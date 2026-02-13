@@ -1,3 +1,4 @@
+use std::convert::TryFrom;
 use tower_http::cors::{Any, CorsLayer};
 use tower_service::Service;
 use worker::*;
@@ -5,6 +6,7 @@ use worker::*;
 mod core;
 mod handlers;
 mod models;
+mod notifications;
 mod router;
 pub use core::{auth, crypto, db, error, jwt, two_factor, webauthn};
 
@@ -23,6 +25,12 @@ pub async fn main(
         .allow_methods(Any)
         .allow_headers(Any)
         .allow_origin(Any);
+
+    if notifications::is_notifications_path(req.uri().path()) {
+        let worker_req = Request::try_from(req)?;
+        let worker_resp = notifications::proxy_notifications_request(&env, worker_req).await?;
+        return Ok(worker_resp.into());
+    }
 
     let mut app = router::api_router(env).layer(cors);
 

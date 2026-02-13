@@ -8,16 +8,18 @@ use std::sync::Arc;
 use worker::Env;
 
 use crate::handlers::{
-    accounts, ciphers, config, devices, folders, identity, icons, import, sends, sync,
-    two_factor, usage, webauthn,
+    accounts, ciphers, config, devices, folders, identity, import, sends, sync, two_factor, usage,
+    webauthn,
 };
 
 pub fn api_router(env: Env) -> Router {
     let app_state = Arc::new(env);
 
     Router::new()
-        .route("/demo.html", get(|| async { Html(include_str!("../static/demo.html")) }))
-        .route("/icons/{*path}", get(icons::get_icon))
+        .route(
+            "/demo.html",
+            get(|| async { Html(include_str!("../static/demo.html")) }),
+        )
         // Identity/Auth routes
         .route("/identity/accounts/prelogin", post(accounts::prelogin))
         .route("/api/accounts/prelogin", post(accounts::prelogin))
@@ -38,29 +40,74 @@ pub fn api_router(env: Env) -> Router {
             "/accounts/webauthn/assertion-options",
             get(identity::webauthn_assertion_options).post(identity::webauthn_assertion_options),
         )
-        .route(
-            "/api/accounts/profile",
-            get(accounts::profile)
-                .post(accounts::post_profile)
-                .put(accounts::post_profile),
-        )
-        .route(
-            "/api/accounts/security-stamp",
-            post(accounts::post_security_stamp),
-        )
+        .route("/api/accounts/profile", get(accounts::profile))
         .route("/api/accounts/revision-date", get(accounts::revision_date))
-        .route("/api/accounts/avatar", put(accounts::update_avatar))
         .route(
             "/api/accounts/verify-password",
             post(accounts::verify_password),
         )
         .route("/accounts/verify-password", post(accounts::verify_password))
-        .route("/api/devices", get(devices::get_devices))
-        .route("/api/devices/identifier/{id}", get(devices::get_device_by_identifier))
         .route("/api/devices/knowndevice", get(devices::knowndevice))
+        .route("/api/devices/knowndevice/", get(devices::knowndevice))
+        .route("/api/devices", get(devices::get_devices))
+        .route("/api/devices/", get(devices::get_devices))
+        .route("/api/devices/identifier/{id}", get(devices::get_device))
+        .route("/api/devices/identifier/{id}/", get(devices::get_device))
         .route(
             "/api/devices/identifier/{id}/token",
             put(devices::device_token).post(devices::device_token),
+        )
+        .route(
+            "/api/devices/identifier/{id}/token/",
+            put(devices::device_token).post(devices::device_token),
+        )
+        .route(
+            "/api/devices/identifier/{id}/clear-token",
+            put(devices::clear_device_token).post(devices::clear_device_token),
+        )
+        .route(
+            "/api/devices/identifier/{id}/clear-token/",
+            put(devices::clear_device_token).post(devices::clear_device_token),
+        )
+        .route(
+            "/api/auth-requests",
+            get(devices::get_auth_requests).post(devices::post_auth_request),
+        )
+        .route(
+            "/api/auth-requests/admin-request",
+            post(devices::post_auth_request),
+        )
+        .route(
+            "/api/auth-requests/",
+            get(devices::get_auth_requests).post(devices::post_auth_request),
+        )
+        .route(
+            "/api/auth-requests/admin-request/",
+            post(devices::post_auth_request),
+        )
+        .route(
+            "/api/auth-requests/pending",
+            get(devices::get_auth_requests_pending),
+        )
+        .route(
+            "/api/auth-requests/pending/",
+            get(devices::get_auth_requests_pending),
+        )
+        .route(
+            "/api/auth-requests/{id}",
+            get(devices::get_auth_request).put(devices::put_auth_request),
+        )
+        .route(
+            "/api/auth-requests/{id}/",
+            get(devices::get_auth_request).put(devices::put_auth_request),
+        )
+        .route(
+            "/api/auth-requests/{id}/response",
+            get(devices::get_auth_request_response),
+        )
+        .route(
+            "/api/auth-requests/{id}/response/",
+            get(devices::get_auth_request_response),
         )
         .route(
             "/api/accounts/password",
@@ -86,6 +133,24 @@ pub fn api_router(env: Env) -> Router {
         .route(
             "/api/two-factor/webauthn",
             put(webauthn::put_webauthn).delete(webauthn::delete_webauthn),
+        )
+        .route(
+            "/api/webauthn/attestation-options",
+            post(webauthn::webauthn_attestation_options),
+        )
+        .route(
+            "/api/webauthn/assertion-options",
+            post(webauthn::webauthn_assertion_options),
+        )
+        .route(
+            "/api/webauthn/{id}/delete",
+            post(webauthn::webauthn_delete_credential),
+        )
+        .route(
+            "/api/webauthn",
+            get(webauthn::api_webauthn_get)
+                .post(webauthn::webauthn_save_credential)
+                .put(webauthn::webauthn_update_credential),
         )
         .route(
             "/api/two-factor/disable",
@@ -154,7 +219,6 @@ pub fn api_router(env: Env) -> Router {
         .route("/api/alive", get(config::alive))
         .route("/api/now", get(config::now))
         .route("/api/version", get(config::version))
-        .route("/api/webauthn", get(config::webauthn))
         .route("/api/d1/usage", get(usage::d1_usage))
         .with_state(app_state)
 }
