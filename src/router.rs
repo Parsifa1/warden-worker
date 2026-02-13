@@ -1,13 +1,16 @@
-use axum::{
-    routing::{get, post, put, delete},
-    Router,
-    response::Html,
-};
 use axum::extract::DefaultBodyLimit;
+use axum::{
+    response::Html,
+    routing::{delete, get, post, put},
+    Router,
+};
 use std::sync::Arc;
 use worker::Env;
 
-use crate::handlers::{accounts, ciphers, config, identity, sync, folders, import, two_factor, devices, sends, usage, icons};
+use crate::handlers::{
+    accounts, ciphers, config, devices, folders, identity, icons, import, sends, sync,
+    two_factor, usage, webauthn,
+};
 
 pub fn api_router(env: Env) -> Router {
     let app_state = Arc::new(env);
@@ -28,6 +31,14 @@ pub fn api_router(env: Env) -> Router {
             post(accounts::send_verification_email),
         )
         .route(
+            "/identity/accounts/webauthn/assertion-options",
+            get(identity::webauthn_assertion_options).post(identity::webauthn_assertion_options),
+        )
+        .route(
+            "/accounts/webauthn/assertion-options",
+            get(identity::webauthn_assertion_options).post(identity::webauthn_assertion_options),
+        )
+        .route(
             "/api/accounts/profile",
             get(accounts::profile)
                 .post(accounts::post_profile)
@@ -39,6 +50,11 @@ pub fn api_router(env: Env) -> Router {
         )
         .route("/api/accounts/revision-date", get(accounts::revision_date))
         .route("/api/accounts/avatar", put(accounts::update_avatar))
+        .route(
+            "/api/accounts/verify-password",
+            post(accounts::verify_password),
+        )
+        .route("/accounts/verify-password", post(accounts::verify_password))
         .route("/api/devices", get(devices::get_devices))
         .route("/api/devices/identifier/{id}", get(devices::get_device_by_identifier))
         .route("/api/devices/knowndevice", get(devices::knowndevice))
@@ -46,19 +62,47 @@ pub fn api_router(env: Env) -> Router {
             "/api/devices/identifier/{id}/token",
             put(devices::device_token).post(devices::device_token),
         )
-        .route("/api/accounts/password", put(accounts::change_master_password))
+        .route(
+            "/api/accounts/password",
+            put(accounts::change_master_password),
+        )
         .route("/api/accounts/email", put(accounts::change_email))
         .route("/api/two-factor", get(two_factor::two_factor_status))
-        .route("/api/two-factor/get-authenticator", post(two_factor::get_authenticator))
+        .route(
+            "/api/two-factor/get-authenticator",
+            post(two_factor::get_authenticator),
+        )
+        .route("/api/two-factor/get-webauthn", post(webauthn::get_webauthn))
+        .route(
+            "/api/two-factor/get-webauthn-challenge",
+            post(webauthn::get_webauthn_challenge),
+        )
         .route(
             "/api/two-factor/authenticator",
             post(two_factor::activate_authenticator)
                 .put(two_factor::activate_authenticator_put)
                 .delete(two_factor::disable_authenticator_vw),
         )
-        .route("/api/two-factor/authenticator/request", post(two_factor::authenticator_request))
-        .route("/api/two-factor/authenticator/enable", post(two_factor::authenticator_enable))
-        .route("/api/two-factor/authenticator/disable", post(two_factor::authenticator_disable))
+        .route(
+            "/api/two-factor/webauthn",
+            put(webauthn::put_webauthn).delete(webauthn::delete_webauthn),
+        )
+        .route(
+            "/api/two-factor/disable",
+            put(two_factor::disable_two_factor),
+        )
+        .route(
+            "/api/two-factor/authenticator/request",
+            post(two_factor::authenticator_request),
+        )
+        .route(
+            "/api/two-factor/authenticator/enable",
+            post(two_factor::authenticator_enable),
+        )
+        .route(
+            "/api/two-factor/authenticator/disable",
+            post(two_factor::authenticator_disable),
+        )
         .route("/api/sends", get(sends::get_sends).post(sends::post_send))
         .route("/api/sends/file/v2", post(sends::post_send_file_v2))
         .route("/api/sends/access/{access_id}", post(sends::post_access))
@@ -73,13 +117,11 @@ pub fn api_router(env: Env) -> Router {
         .route("/api/sends/{send_id}/{file_id}", get(sends::download_send))
         .route(
             "/api/sends/{send_id}/file/{file_id}",
-            post(sends::post_send_file_v2_data)
-                .layer(DefaultBodyLimit::max(100 * 1024 * 1024)),
+            post(sends::post_send_file_v2_data).layer(DefaultBodyLimit::max(100 * 1024 * 1024)),
         )
         .route(
             "/sends/{send_id}/file/{file_id}",
-            post(sends::post_send_file_v2_data)
-                .layer(DefaultBodyLimit::max(100 * 1024 * 1024)),
+            post(sends::post_send_file_v2_data).layer(DefaultBodyLimit::max(100 * 1024 * 1024)),
         )
         // Main data sync route
         .route("/api/sync", get(sync::get_sync_data))
