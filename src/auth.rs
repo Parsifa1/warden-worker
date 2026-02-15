@@ -20,6 +20,7 @@ pub struct Claims {
     pub email: String,
     pub email_verified: bool,
     pub amr: Vec<String>,
+    pub security_stamp: Option<String>,
 }
 
 impl FromRequestParts<Arc<Env>> for Claims

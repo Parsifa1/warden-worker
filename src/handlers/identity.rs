@@ -108,6 +108,7 @@ fn generate_tokens_and_response(
         email: user.email.clone(),
         email_verified: true,
         amr: vec!["Application".into()],
+        security_stamp: Some(user.security_stamp.clone()),
     };
 
     let jwt_secret = env.secret("JWT_SECRET")?.to_string();
@@ -128,6 +129,7 @@ fn generate_tokens_and_response(
         email: user.email.clone(),
         email_verified: true,
         amr: vec!["Application".into()],
+        security_stamp: Some(user.security_stamp.clone()),
     };
     let jwt_refresh_secret = env.secret("JWT_REFRESH_SECRET")?.to_string();
     let refresh_token = encode(
@@ -518,6 +520,12 @@ pub async fn token(
                 .map_err(|_| AppError::Unauthorized("Invalid user".to_string()))?
                 .ok_or_else(|| AppError::Unauthorized("Invalid user".to_string()))?;
             let user: User = serde_json::from_value(user).map_err(|_| AppError::Internal)?;
+
+            if let Some(stamp) = token_data.claims.security_stamp {
+                if stamp != user.security_stamp {
+                    return Err(AppError::Unauthorized("Invalid security stamp".to_string()));
+                }
+            }
 
             let response = generate_tokens_and_response(user, &env)?;
             let mut resp = Json(response.clone()).into_response();
