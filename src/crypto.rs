@@ -6,6 +6,7 @@ use worker::js_sys;
 
 use crate::error::AppError;
 
+#[allow(dead_code)]
 pub fn worker_global() -> Option<WorkerGlobalScope> {
     use wasm_bindgen::JsCast;
 
@@ -13,6 +14,7 @@ pub fn worker_global() -> Option<WorkerGlobalScope> {
 }
 
 /// Gets the SubtleCrypto interface from the global scope.
+#[allow(dead_code)]
 fn subtle_crypto() -> Result<SubtleCrypto, AppError> {
     Ok(worker_global()
         .ok_or_else(|| AppError::Crypto("Could not get worker global scope".to_string()))?
@@ -22,6 +24,7 @@ fn subtle_crypto() -> Result<SubtleCrypto, AppError> {
 }
 
 /// Derives a key using PBKDF2-SHA256.
+#[allow(dead_code)]
 pub async fn pbkdf2_sha256(
     password: &[u8],
     salt: &[u8],
@@ -73,6 +76,7 @@ pub async fn pbkdf2_sha256(
 }
 
 /// Generates a hash of the master key for password verification.
+#[allow(dead_code)]
 pub async fn hash_master_key(
     master_key: &[u8],
     master_password: &[u8],

@@ -32,13 +32,7 @@ impl FromRequestParts<Arc<Env>> for Claims
             .headers
             .get(header::AUTHORIZATION)
             .and_then(|auth_header| auth_header.to_str().ok())
-            .and_then(|auth_value| {
-                if auth_value.starts_with("Bearer ") {
-                    Some(auth_value[7..].to_owned())
-                } else {
-                    None
-                }
-            })
+            .and_then(|auth_value| auth_value.strip_prefix("Bearer ").map(|stripped| stripped.to_owned()))
             .or_else(|| {
                 let raw = parts.headers.get(header::COOKIE)?.to_str().ok()?;
                 for part in raw.split(';') {

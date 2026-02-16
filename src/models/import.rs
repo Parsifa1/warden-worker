@@ -18,10 +18,10 @@ pub struct ImportCipher {
     pub fields: Option<Value>,
     pub password_history: Option<Value>,
     pub reprompt: Option<i32>,
+    #[allow(dead_code)]
     pub last_known_revision_date: Option<String>,
     pub encrypted_for: String,
 }
-
 
 #[derive(Deserialize, Debug)]
 #[serde(rename_all = "camelCase")]

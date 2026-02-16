@@ -46,6 +46,12 @@ pub struct ChangeEmailRequest {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct UpdateAvatarRequest {
+    pub avatar_color: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ProfileData {
     pub name: Option<String>,
 }
@@ -80,6 +86,7 @@ pub async fn profile(
         "key": user.key,
         "privateKey": user.private_key,
         "securityStamp": user.security_stamp,
+        "avatarColor": user.avatar_color,
         "organizations": [],
         "object": "profile"
     })))
@@ -236,11 +243,12 @@ pub async fn register(
         kdf_type: payload.kdf,
         kdf_iterations: payload.kdf_iterations,
         security_stamp: Uuid::new_v4().to_string(),
+        avatar_color: None,
         created_at: now.clone(),
         updated_at: now,
     };
 
-    let query = query!(
+    query!(
         &db,
         "INSERT INTO users (id, name, email, master_password_hash, key, private_key, public_key, kdf_iterations, security_stamp, created_at, updated_at)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
@@ -255,14 +263,10 @@ pub async fn register(
          user.security_stamp,
          user.created_at,
          user.updated_at
-    ).map_err(|error|{
-        AppError::Database
-    })?
+    ).map_err(|_| AppError::Database)?
     .run()
     .await
-    .map_err(|error|{
-        AppError::Database
-    })?;
+    .map_err(|_| AppError::Database)?;
 
     Ok(Json(json!({})))
 }
@@ -409,4 +413,61 @@ fn to_js_val<T: Into<JsValue>>(val: Option<T>) -> JsValue {
 #[worker::send]
 pub async fn send_verification_email() -> String {
     "fixed-token-to-mock".to_string()
+}
+
+#[worker::send]
+pub async fn update_avatar(
+    claims: Claims,
+    State(env): State<Arc<Env>>,
+    Json(payload): Json<UpdateAvatarRequest>,
+) -> Result<Json<Value>, AppError> {
+    if let Some(ref color) = payload.avatar_color {
+        if color.len() != 7 {
+            return Err(AppError::BadRequest(
+                "The field AvatarColor must be a HTML/Hex color code with a length of 7 characters".to_string()
+            ));
+        }
+    }
+
+    let db = db::get_db(&env)?;
+    let now = Utc::now().to_rfc3339();
+
+    db.prepare("UPDATE users SET avatar_color = ?1, updated_at = ?2 WHERE id = ?3")
+        .bind(&[
+            to_js_val(payload.avatar_color.clone()),
+            now.into(),
+            claims.sub.clone().into(),
+        ])?
+        .run()
+        .await
+        .map_err(|_| AppError::Database)?;
+
+    let two_factor_enabled = two_factor::is_authenticator_enabled(&db, &claims.sub).await?;
+    let user: User = query!(
+        &db,
+        "SELECT * FROM users WHERE id = ?1",
+        claims.sub
+    )
+    .map_err(|_| AppError::Database)?
+    .first(None)
+    .await?
+    .ok_or(AppError::NotFound("User not found".to_string()))?;
+
+    Ok(Json(json!({
+        "id": user.id,
+        "name": user.name,
+        "email": user.email,
+        "emailVerified": user.email_verified,
+        "premium": true,
+        "premiumFromOrganization": false,
+        "masterPasswordHint": user.master_password_hint,
+        "culture": "en-US",
+        "twoFactorEnabled": two_factor_enabled,
+        "key": user.key,
+        "privateKey": user.private_key,
+        "securityStamp": user.security_stamp,
+        "avatarColor": user.avatar_color,
+        "organizations": [],
+        "object": "profile"
+    })))
 }
