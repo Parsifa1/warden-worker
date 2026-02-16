@@ -3,8 +3,8 @@ name: Build
 on:
     push:
         branches: [main, uat, release*]
-    pull_request_target:
-        branches: [main, uat, release*]
+    # pull_request_target:
+    #     branches: [main, uat, release*]
     workflow_dispatch:
 
 jobs:
