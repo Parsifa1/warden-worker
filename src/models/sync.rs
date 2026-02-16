@@ -29,6 +29,8 @@ pub struct Profile {
     #[serde(rename = "privateKey")]
     pub private_key: String,
     pub key: String,
+    #[serde(rename = "avatarColor")]
+    pub avatar_color: Option<String>,
 }
 
 #[derive(Debug, Serialize)]

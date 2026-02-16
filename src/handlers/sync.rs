@@ -96,6 +96,7 @@ pub async fn get_sync_data(
         creation_date: time,
         key: user.key,
         private_key: user.private_key,
+        avatar_color: user.avatar_color,
     };
 
     let response = SyncResponse {
