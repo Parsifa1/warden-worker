@@ -80,6 +80,7 @@ wrangler deploy
 - 2FA：`GET /api/two-factor`、`/api/two-factor/authenticator/*`
 - 官方安卓设备探测：`GET /api/devices/knowndevice`
 - icon支持: `GET /icons/{*res}`
+- `PUT /api/accounts/avatar` 可以选择头像颜色(需要执行./sql/migrations/20260216_add_avatar_color.sql )
 
 ## 本地开发
 
