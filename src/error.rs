@@ -21,6 +21,7 @@ pub enum AppError {
     #[error("Unauthorized: {0}")]
     Unauthorized(String),
 
+    #[allow(dead_code)]
     #[error("Cryptography error: {0}")]
     Crypto(String),
 

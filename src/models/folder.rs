@@ -20,6 +20,7 @@ pub struct FolderResponse {
     pub object: String,
 }
 
+#[allow(dead_code)]
 fn default_object() -> String {
     "folder".to_string()
 }

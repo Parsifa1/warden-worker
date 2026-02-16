@@ -177,7 +177,7 @@ pub fn decrypt_secret_with_optional_key(
             )
         })?;
 
-    Ok(String::from_utf8(pt).map_err(|_| AppError::Internal)?)
+    String::from_utf8(pt).map_err(|_| AppError::Internal)
 }
 
 pub fn verify_totp_code(secret_encoded: &str, token: &str) -> Result<bool, AppError> {

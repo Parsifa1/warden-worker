@@ -462,7 +462,7 @@ pub async fn post_send_file_v2_data(
 
     let now = now_rfc3339_millis();
 
-    let estimated_b64_len: usize = ((size as usize + 2) / 3) * 4;
+    let estimated_b64_len: usize = (size as usize).div_ceil(3) * 4;
     let should_inline = estimated_b64_len <= SEND_FILE_B64_CHUNK_LEN;
 
     let mut uploaded = false;

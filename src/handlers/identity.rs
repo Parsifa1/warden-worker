@@ -56,9 +56,11 @@ where
 pub struct TokenRequest {
     grant_type: String,
     username: Option<String>,
-    password: Option<String>, // This is the masterPasswordHash
+    password: Option<String>,
     refresh_token: Option<String>,
+    #[allow(dead_code)]
     scope: Option<String>,
+    #[allow(dead_code)]
     client_id: Option<String>,
     #[serde(rename = "deviceIdentifier", alias = "device_identifier", alias = "deviceId")]
     device_identifier: Option<String>,

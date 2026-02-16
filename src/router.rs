@@ -38,6 +38,7 @@ pub fn api_router(env: Env) -> Router {
             post(accounts::post_security_stamp),
         )
         .route("/api/accounts/revision-date", get(accounts::revision_date))
+        .route("/api/accounts/avatar", put(accounts::update_avatar))
         .route("/api/devices", get(devices::get_devices))
         .route("/api/devices/identifier/{id}", get(devices::get_device_by_identifier))
         .route("/api/devices/knowndevice", get(devices::knowndevice))

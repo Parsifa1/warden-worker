@@ -15,6 +15,7 @@ pub struct User {
     pub kdf_type: i32,
     pub kdf_iterations: i32,
     pub security_stamp: String,
+    pub avatar_color: Option<String>,
     pub created_at: String,
     pub updated_at: String,
 }

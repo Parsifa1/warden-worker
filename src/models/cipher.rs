@@ -118,22 +118,19 @@ pub struct CipherDBModel {
     pub updated_at: String,
 }
 
-impl Into<Cipher> for CipherDBModel {
-    fn into(self) -> Cipher {
+impl From<CipherDBModel> for Cipher {
+    fn from(val: CipherDBModel) -> Self {
         Cipher {
-            id: self.id,
-            user_id: Some(self.user_id),
-            organization_id: self.organization_id,
-            r#type: self.r#type,
-            data: serde_json::from_str(&self.data).unwrap_or_default(),
-            favorite: match self.favorite {
-                0 => false,
-                _ => true,
-            },
-            folder_id: self.folder_id,
-            deleted_at: self.deleted_at,
-            created_at: self.created_at,
-            updated_at: self.updated_at,
+            id: val.id,
+            user_id: Some(val.user_id),
+            organization_id: val.organization_id,
+            r#type: val.r#type,
+            data: serde_json::from_str(&val.data).unwrap_or_default(),
+            favorite: !matches!(val.favorite, 0),
+            folder_id: val.folder_id,
+            deleted_at: val.deleted_at,
+            created_at: val.created_at,
+            updated_at: val.updated_at,
             object: "default_object".to_string(),
             organization_use_totp: false,
             edit: true,
