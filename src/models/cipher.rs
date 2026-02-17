@@ -326,7 +326,6 @@ pub struct CipherRequestData {
 
 // Represents the full request payload for creating a cipher.
 #[derive(Debug, Deserialize)]
-#[serde(rename_all = "PascalCase")]
 pub struct CreateCipherRequest {
     pub cipher: CipherRequestData,
     #[serde(default)]
