@@ -272,6 +272,7 @@ pub async fn publish_auth_response(env: &Env, user_id: &str, auth_request_id: &s
     .await
 }
 
+#[allow(dead_code)]
 pub async fn close_anonymous_subscription(env: &Env, token: &str) -> Result<()> {
     dispatch_internal(
         env,
