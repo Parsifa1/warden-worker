@@ -117,7 +117,8 @@ async fn webauthn_response(
     db: &worker::D1Database,
     user_id: &str,
 ) -> Result<serde_json::Value, AppError> {
-    let keys = webauthn::list_webauthn_keys(db, user_id).await?;
+    let keys = webauthn::list_webauthn_2fa_keys(db, user_id).await?;
+    let enabled = webauthn::is_webauthn_enabled(db, user_id).await?;
     let key_items: Vec<Value> = keys
         .into_iter()
         .map(|k| {
@@ -129,7 +130,7 @@ async fn webauthn_response(
         })
         .collect();
     Ok(json!({
-        "Enabled": !key_items.is_empty(),
+        "Enabled": enabled,
         "Keys": key_items
     }))
 }
@@ -138,25 +139,48 @@ async fn webauthn_credentials_response(
     db: &worker::D1Database,
     user_id: &str,
 ) -> Result<serde_json::Value, AppError> {
+    fn enc_obj(v: &Option<String>) -> Value {
+        match v {
+            Some(s) => json!({ "encryptedString": s }),
+            None => Value::Null,
+        }
+    }
+
     let keys = webauthn::list_webauthn_api_items(db, user_id).await?;
     let data: Vec<Value> = keys
         .into_iter()
         .map(|k| {
             json!({
                 "Id": k.id,
+                "id": k.id,
                 "Name": k.name,
+                "name": k.name,
                 "PrfStatus": k.prf_status,
+                "prfStatus": k.prf_status,
                 "EncryptedPublicKey": k.encrypted_public_key,
+                "EncryptedPublicKeyObj": enc_obj(&k.encrypted_public_key),
+                "encryptedPublicKey": k.encrypted_public_key,
+                "encryptedPublicKeyObject": enc_obj(&k.encrypted_public_key),
                 "EncryptedUserKey": k.encrypted_user_key,
-                "EncryptedPrivateKey": k.encrypted_private_key
+                "EncryptedUserKeyObj": enc_obj(&k.encrypted_user_key),
+                "encryptedUserKey": k.encrypted_user_key,
+                "encryptedUserKeyObject": enc_obj(&k.encrypted_user_key),
+                "EncryptedPrivateKey": k.encrypted_private_key,
+                "EncryptedPrivateKeyObj": enc_obj(&k.encrypted_private_key),
+                "encryptedPrivateKey": k.encrypted_private_key,
+                "encryptedPrivateKeyObject": enc_obj(&k.encrypted_private_key)
             })
         })
         .collect();
+    let data_lower = data.clone();
 
     Ok(json!({
         "Object": "list",
+        "object": "list",
         "Data": data,
-        "ContinuationToken": Value::Null
+        "data": data_lower,
+        "ContinuationToken": Value::Null,
+        "continuationToken": Value::Null
     }))
 }
 
@@ -246,6 +270,7 @@ pub async fn webauthn_attestation_options(
         user_email,
         &rp_id,
         &origin,
+        webauthn::WEBAUTHN_USE_LOGIN,
     )
     .await?;
 
@@ -272,7 +297,13 @@ pub async fn webauthn_assertion_options(
 
     let rp_id = webauthn::rp_id_from_headers(&headers);
     let origin = webauthn::origin_from_headers(&headers);
-    let options = webauthn::issue_login_challenge(&db, &claims.sub, &rp_id, &origin)
+    let options = webauthn::issue_login_challenge(
+        &db,
+        &claims.sub,
+        &rp_id,
+        &origin,
+        webauthn::WEBAUTHN_USE_LOGIN,
+    )
         .await?
         .ok_or_else(|| AppError::BadRequest("No WebAuthn credentials registered".to_string()))?;
 
@@ -304,6 +335,7 @@ pub async fn webauthn_save_credential(
         &name,
         &payload.device_response.response.attestation_object,
         &payload.device_response.response.client_data_json,
+        webauthn::WEBAUTHN_USE_LOGIN,
     )
     .await?;
 
@@ -323,7 +355,7 @@ pub async fn webauthn_save_credential(
         .map(str::trim)
         .filter(|v| !v.is_empty());
     let prf_status = if payload.supports_prf.unwrap_or(false) {
-        if encrypted_public_key.is_some() && encrypted_user_key.is_some() {
+        if encrypted_user_key.is_some() && encrypted_private_key.is_some() {
             webauthn::WEBAUTHN_PRF_STATUS_ENABLED
         } else {
             webauthn::WEBAUTHN_PRF_STATUS_SUPPORTED
@@ -355,7 +387,13 @@ pub async fn webauthn_update_credential(
     let assertion_token_json = serde_json::to_string(&payload.device_response)
         .map_err(|_| AppError::BadRequest("Invalid WebAuthn assertion".to_string()))?;
 
-    webauthn::verify_login_assertion(&db, &claims.sub, &assertion_token_json).await?;
+    webauthn::verify_login_assertion(
+        &db,
+        &claims.sub,
+        &assertion_token_json,
+        webauthn::WEBAUTHN_USE_LOGIN,
+    )
+    .await?;
     let credential_id_b64url =
         webauthn::extract_assertion_credential_id_b64url(&assertion_token_json)?;
     let encrypted_public_key = payload
@@ -373,10 +411,18 @@ pub async fn webauthn_update_credential(
         .as_deref()
         .map(str::trim)
         .filter(|v| !v.is_empty());
-    if encrypted_public_key.is_none() || encrypted_user_key.is_none() {
-        return Err(AppError::BadRequest(
-            "Missing encrypted keyset for passkey encryption".to_string(),
-        ));
+    if encrypted_user_key.is_none() || encrypted_private_key.is_none() {
+        let mut missing = Vec::new();
+        if encrypted_user_key.is_none() {
+            missing.push("encryptedUserKey");
+        }
+        if encrypted_private_key.is_none() {
+            missing.push("encryptedPrivateKey");
+        }
+        return Err(AppError::BadRequest(format!(
+            "Missing encrypted keyset fields: {}. Passkey PRF key generation likely failed or is unsupported on this authenticator/browser. Re-create the passkey with PRF support, then retry enable encryption.",
+            missing.join(", ")
+        )));
     }
     webauthn::update_webauthn_prf_by_credential_id(
         &db,
@@ -449,6 +495,7 @@ pub async fn get_webauthn_challenge(
         user_email,
         &rp_id,
         &origin,
+        webauthn::WEBAUTHN_USE_2FA,
     )
     .await?;
 
@@ -469,15 +516,28 @@ pub async fn put_webauthn(
     .validate(&db, &claims.sub)
     .await?;
 
+    let desired_slot_id = payload.id;
+    let all_keys = webauthn::list_webauthn_keys(&db, &claims.sub).await?;
+    let occupied: std::collections::HashSet<i32> = all_keys.into_iter().map(|k| k.id).collect();
+    let slot_id = if occupied.contains(&desired_slot_id) {
+        (1..=5)
+            .find(|id| !occupied.contains(id))
+            .ok_or_else(|| AppError::BadRequest("WebAuthn key slots are full".to_string()))?
+    } else {
+        desired_slot_id
+    };
+
     webauthn::register_webauthn_credential(
         &db,
         &claims.sub,
-        payload.id,
+        slot_id,
         payload.name.as_deref().unwrap_or(""),
         &payload.device_response.response.attestation_object,
         &payload.device_response.response.client_data_json,
+        webauthn::WEBAUTHN_USE_2FA,
     )
     .await?;
+    webauthn::set_webauthn_two_factor_enabled(&db, &claims.sub, true).await?;
 
     Ok(Json(webauthn_response(&db, &claims.sub).await?))
 }
@@ -497,5 +557,8 @@ pub async fn delete_webauthn(
     .await?;
 
     webauthn::delete_webauthn_key(&db, &claims.sub, payload.id).await?;
+    if !webauthn::has_webauthn_credentials(&db, &claims.sub).await? {
+        webauthn::set_webauthn_two_factor_enabled(&db, &claims.sub, false).await?;
+    }
     Ok(Json(webauthn_response(&db, &claims.sub).await?))
 }

@@ -18,6 +18,9 @@ pub const TWO_FACTOR_PROVIDER_WEBAUTHN: i32 = 7;
 pub const WEBAUTHN_PRF_STATUS_ENABLED: i32 = 0;
 pub const WEBAUTHN_PRF_STATUS_SUPPORTED: i32 = 1;
 pub const WEBAUTHN_PRF_STATUS_UNSUPPORTED: i32 = 2;
+pub const WEBAUTHN_USE_LOGIN: &str = "login";
+pub const WEBAUTHN_USE_2FA: &str = "2fa";
+pub const WEBAUTHN_USE_BOTH: &str = "both";
 const CHALLENGE_KIND_REGISTER: &str = "register";
 const CHALLENGE_KIND_LOGIN: &str = "login";
 const CHALLENGE_TTL_SECONDS: i64 = 300;
@@ -61,6 +64,7 @@ struct StoredCredentialRow {
     credential_id_b64url: String,
     public_key_cose_b64: String,
     sign_count: i64,
+    #[allow(dead_code)]
     name: Option<String>,
 }
 
@@ -137,6 +141,7 @@ pub async fn ensure_webauthn_tables(db: &D1Database) -> Result<(), AppError> {
             encrypted_public_key TEXT,
             encrypted_user_key TEXT,
             encrypted_private_key TEXT,
+            credential_use TEXT NOT NULL DEFAULT 'both',
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL,
             PRIMARY KEY (user_id, slot_id),
@@ -165,6 +170,19 @@ pub async fn ensure_webauthn_tables(db: &D1Database) -> Result<(), AppError> {
     .await
     .map_err(|_| AppError::Database)?;
 
+    db.prepare(
+        "CREATE TABLE IF NOT EXISTS two_factor_webauthn_settings (
+            user_id TEXT PRIMARY KEY NOT NULL,
+            enabled INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        )",
+    )
+    .run()
+    .await
+    .map_err(|_| AppError::Database)?;
+
     // Production schema self-healing: old deployments may already have these tables
     // with missing columns. SQLite/D1 has no IF NOT EXISTS for ADD COLUMN, so ignore
     // duplicate-column errors and only fail on unexpected issues.
@@ -175,6 +193,7 @@ pub async fn ensure_webauthn_tables(db: &D1Database) -> Result<(), AppError> {
         "ALTER TABLE two_factor_webauthn ADD COLUMN encrypted_public_key TEXT",
         "ALTER TABLE two_factor_webauthn ADD COLUMN encrypted_user_key TEXT",
         "ALTER TABLE two_factor_webauthn ADD COLUMN encrypted_private_key TEXT",
+        "ALTER TABLE two_factor_webauthn ADD COLUMN credential_use TEXT NOT NULL DEFAULT 'both'",
         "ALTER TABLE two_factor_webauthn ADD COLUMN created_at TEXT NOT NULL DEFAULT ''",
         "ALTER TABLE two_factor_webauthn ADD COLUMN updated_at TEXT NOT NULL DEFAULT ''",
         "ALTER TABLE webauthn_challenges ADD COLUMN challenge_b64url TEXT",
@@ -204,15 +223,30 @@ pub async fn ensure_webauthn_tables(db: &D1Database) -> Result<(), AppError> {
              SET name = COALESCE(name, ''),
                  sign_count = COALESCE(sign_count, 0),
                  prf_status = COALESCE(prf_status, 2),
+                 credential_use = COALESCE(NULLIF(credential_use, ''), 'both'),
                  created_at = COALESCE(NULLIF(created_at, ''), ?1),
                  updated_at = COALESCE(NULLIF(updated_at, ''), ?1)
              WHERE name IS NULL
                 OR sign_count IS NULL
                 OR prf_status IS NULL
+                OR credential_use IS NULL OR credential_use = ''
                 OR created_at IS NULL OR created_at = ''
                 OR updated_at IS NULL OR updated_at = ''",
         )
         .bind(&[now.clone().into()])?
+        .run()
+        .await;
+
+    // Backfill old mixed records into explicit purpose buckets.
+    let _ = db
+        .prepare(
+            "UPDATE two_factor_webauthn
+             SET credential_use = CASE
+                 WHEN COALESCE(encrypted_user_key, '') != '' OR COALESCE(encrypted_private_key, '') != '' THEN 'login'
+                 ELSE '2fa'
+             END
+             WHERE credential_use = 'both' OR credential_use IS NULL OR credential_use = ''",
+        )
         .run()
         .await;
 
@@ -243,13 +277,68 @@ pub async fn ensure_webauthn_tables(db: &D1Database) -> Result<(), AppError> {
 
 pub async fn is_webauthn_enabled(db: &D1Database, user_id: &str) -> Result<bool, AppError> {
     ensure_webauthn_tables(db).await?;
+    let enabled: Option<i64> = db
+        .prepare("SELECT enabled FROM two_factor_webauthn_settings WHERE user_id = ?1")
+        .bind(&[user_id.into()])?
+        .first(Some("enabled"))
+        .await
+        .map_err(|_| AppError::Database)?;
+    if !matches!(enabled, Some(1)) {
+        return Ok(false);
+    }
+
     let count: Option<i64> = db
-        .prepare("SELECT COUNT(1) AS total FROM two_factor_webauthn WHERE user_id = ?1")
+        .prepare(
+            "SELECT COUNT(1) AS total
+             FROM two_factor_webauthn
+             WHERE user_id = ?1 AND credential_use IN ('2fa', 'both')",
+        )
         .bind(&[user_id.into()])?
         .first(Some("total"))
         .await
         .map_err(|_| AppError::Database)?;
     Ok(count.unwrap_or(0) > 0)
+}
+
+pub async fn has_webauthn_credentials(db: &D1Database, user_id: &str) -> Result<bool, AppError> {
+    ensure_webauthn_tables(db).await?;
+    let count: Option<i64> = db
+        .prepare(
+            "SELECT COUNT(1) AS total
+             FROM two_factor_webauthn
+             WHERE user_id = ?1 AND credential_use IN ('2fa', 'both')",
+        )
+        .bind(&[user_id.into()])?
+        .first(Some("total"))
+        .await
+        .map_err(|_| AppError::Database)?;
+    Ok(count.unwrap_or(0) > 0)
+}
+
+pub async fn set_webauthn_two_factor_enabled(
+    db: &D1Database,
+    user_id: &str,
+    enabled: bool,
+) -> Result<(), AppError> {
+    ensure_webauthn_tables(db).await?;
+    let now = Utc::now().to_rfc3339();
+    db.prepare(
+        "INSERT INTO two_factor_webauthn_settings (user_id, enabled, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4)
+         ON CONFLICT(user_id) DO UPDATE SET
+           enabled = excluded.enabled,
+           updated_at = excluded.updated_at",
+    )
+    .bind(&[
+        user_id.into(),
+        (if enabled { 1.0 } else { 0.0 }).into(),
+        now.clone().into(),
+        now.into(),
+    ])?
+    .run()
+    .await
+    .map_err(|_| AppError::Database)?;
+    Ok(())
 }
 
 pub async fn list_webauthn_keys(
@@ -290,6 +379,44 @@ pub async fn list_webauthn_keys(
     Ok(out)
 }
 
+pub async fn list_webauthn_2fa_keys(
+    db: &D1Database,
+    user_id: &str,
+) -> Result<Vec<WebAuthnCredentialSummary>, AppError> {
+    ensure_webauthn_tables(db).await?;
+    let rows: Vec<Value> = db
+        .prepare(
+            "SELECT slot_id, name
+             FROM two_factor_webauthn
+             WHERE user_id = ?1 AND credential_use IN ('2fa', 'both')
+             ORDER BY slot_id ASC",
+        )
+        .bind(&[user_id.into()])?
+        .all()
+        .await
+        .map_err(|_| AppError::Database)?
+        .results()?;
+
+    let mut out = Vec::with_capacity(rows.len());
+    for row in rows {
+        let slot_id = row
+            .get("slot_id")
+            .and_then(|v| v.as_i64())
+            .ok_or(AppError::Database)? as i32;
+        let name = row
+            .get("name")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .to_string();
+        out.push(WebAuthnCredentialSummary {
+            id: slot_id,
+            name,
+            migrated: false,
+        });
+    }
+    Ok(out)
+}
+
 pub async fn list_webauthn_api_items(
     db: &D1Database,
     user_id: &str,
@@ -299,7 +426,7 @@ pub async fn list_webauthn_api_items(
         .prepare(
             "SELECT slot_id, name, prf_status, encrypted_public_key, encrypted_user_key, encrypted_private_key
              FROM two_factor_webauthn
-             WHERE user_id = ?1
+             WHERE user_id = ?1 AND credential_use IN ('login', 'both')
              ORDER BY slot_id ASC",
         )
         .bind(&[user_id.into()])?
@@ -339,7 +466,7 @@ pub async fn list_webauthn_api_items(
             .filter(|v| !v.is_empty())
             .map(|v| v.to_string());
 
-        let has_keyset = encrypted_public_key.is_some() && encrypted_user_key.is_some();
+        let has_keyset = encrypted_user_key.is_some() && encrypted_private_key.is_some();
         let prf_status = if has_keyset {
             WEBAUTHN_PRF_STATUS_ENABLED
         } else if prf_status_raw == WEBAUTHN_PRF_STATUS_SUPPORTED {
@@ -475,11 +602,15 @@ pub async fn delete_webauthn_key(
 
 pub async fn disable_webauthn(db: &D1Database, user_id: &str) -> Result<(), AppError> {
     ensure_webauthn_tables(db).await?;
-    db.prepare("DELETE FROM two_factor_webauthn WHERE user_id = ?1")
-        .bind(&[user_id.into()])?
-        .run()
-        .await
-        .map_err(|_| AppError::Database)?;
+    set_webauthn_two_factor_enabled(db, user_id, false).await?;
+    db.prepare(
+        "DELETE FROM two_factor_webauthn
+         WHERE user_id = ?1 AND credential_use IN ('2fa', 'both')",
+    )
+    .bind(&[user_id.into()])?
+    .run()
+    .await
+    .map_err(|_| AppError::Database)?;
     db.prepare("DELETE FROM webauthn_challenges WHERE user_id = ?1")
         .bind(&[user_id.into()])?
         .run()
@@ -496,13 +627,28 @@ pub fn rp_id_from_headers(headers: &HeaderMap) -> String {
 }
 
 pub fn origin_from_headers(headers: &HeaderMap) -> String {
-    let proto = header_first_token(headers, "x-forwarded-proto")
-        .or_else(|| header_first_token(headers, "x-forwarded-scheme"))
-        .unwrap_or_else(|| "https".to_string())
-        .to_ascii_lowercase();
-    let mut host = header_first_token(headers, "x-forwarded-host")
+    if let Some(origin) = header_first_token(headers, "origin") {
+        if let Some(normalized) = normalize_origin(&origin) {
+            return normalized;
+        }
+    }
+
+    let host = header_first_token(headers, "x-forwarded-host")
         .or_else(|| header_first_token(headers, "host"))
         .unwrap_or_else(|| "localhost".to_string());
+    let rp_id = normalize_rp_id(&host);
+
+    let proto = header_first_token(headers, "x-forwarded-proto")
+        .or_else(|| header_first_token(headers, "x-forwarded-scheme"))
+        .unwrap_or_else(|| {
+            if rp_id == "localhost" || rp_id == "127.0.0.1" || rp_id == "::1" {
+                "http".to_string()
+            } else {
+                "https".to_string()
+            }
+        })
+        .to_ascii_lowercase();
+    let mut host = host;
     if !host.contains(':') && !host.ends_with(']') {
         if let Some(port) = header_first_token(headers, "x-forwarded-port") {
             host = format!("{host}:{port}");
@@ -519,6 +665,7 @@ pub async fn issue_registration_challenge(
     user_email: &str,
     rp_id: &str,
     origin: &str,
+    credential_use: &str,
 ) -> Result<Value, AppError> {
     ensure_webauthn_tables(db).await?;
     let challenge = random_challenge_b64url();
@@ -532,7 +679,7 @@ pub async fn issue_registration_challenge(
     )
     .await?;
 
-    let existing = list_stored_credentials(db, user_id).await?;
+    let existing = list_stored_credentials(db, user_id, credential_use).await?;
     let exclude_credentials = existing
         .iter()
         .map(|row| {
@@ -582,9 +729,10 @@ pub async fn issue_login_challenge(
     user_id: &str,
     rp_id: &str,
     origin: &str,
+    credential_use: &str,
 ) -> Result<Option<Value>, AppError> {
     ensure_webauthn_tables(db).await?;
-    let existing = list_stored_credentials(db, user_id).await?;
+    let existing = list_stored_credentials(db, user_id, credential_use).await?;
     if existing.is_empty() {
         return Ok(None);
     }
@@ -650,6 +798,7 @@ pub async fn register_webauthn_credential(
     name: &str,
     attestation_object_b64: &str,
     client_data_json_b64: &str,
+    credential_use: &str,
 ) -> Result<(), AppError> {
     ensure_webauthn_tables(db).await?;
 
@@ -661,7 +810,11 @@ pub async fn register_webauthn_credential(
 
     let pending = pop_pending_challenge(db, user_id)
         .await?
-        .ok_or_else(|| AppError::BadRequest("Missing WebAuthn challenge".to_string()))?;
+        .ok_or_else(|| {
+            AppError::BadRequest(
+                "Missing WebAuthn challenge. Call /api/webauthn/attestation-options first, then submit /api/webauthn immediately with the same user session (challenge may be expired or already consumed).".to_string(),
+            )
+        })?;
     if pending.challenge_type != CHALLENGE_KIND_REGISTER {
         return Err(AppError::BadRequest(
             "WebAuthn challenge type mismatch".to_string(),
@@ -699,6 +852,7 @@ pub async fn register_webauthn_credential(
         &credential_id,
         &credential_public_key_cose,
         sign_count as i64,
+        credential_use,
     )
     .await
 }
@@ -707,6 +861,7 @@ pub async fn verify_login_assertion(
     db: &D1Database,
     user_id: &str,
     assertion_token_json: &str,
+    credential_use: &str,
 ) -> Result<(), AppError> {
     ensure_webauthn_tables(db).await?;
     let pending = pop_pending_challenge(db, user_id)
@@ -758,7 +913,7 @@ pub async fn verify_login_assertion(
         }
     };
     let credential_id_b64url = encode_b64url(&credential_id_raw);
-    let stored = get_stored_credential(db, user_id, &credential_id_b64url)
+    let stored = get_stored_credential(db, user_id, &credential_id_b64url, credential_use)
         .await?
         .ok_or_else(|| AppError::Unauthorized("Invalid two factor token".to_string()))?;
 
@@ -810,58 +965,92 @@ pub async fn verify_passwordless_login_assertion(
     assertion_token_json: &str,
     jwt_secret: &str,
 ) -> Result<PasswordlessLoginResult, AppError> {
+    fn app_error_message(err: AppError) -> String {
+        match err {
+            AppError::BadRequest(msg) => msg,
+            AppError::Unauthorized(msg) => msg,
+            AppError::NotFound(msg) => msg,
+            AppError::Database => "database error".to_string(),
+            AppError::Worker(e) => format!("worker error: {e}"),
+            AppError::Crypto(msg) => msg,
+            AppError::Internal => "internal server error".to_string(),
+        }
+    }
+
     ensure_webauthn_tables(db).await?;
     let claims: WebAuthnLoginTokenClaims = jwt::decode_hs256(challenge_token, jwt_secret)?;
 
     let assertion: WebAuthnAssertionToken = serde_json::from_str(assertion_token_json)
-        .map_err(|_| AppError::Unauthorized("Invalid credentials".to_string()))?;
+        .map_err(|_| AppError::Unauthorized("Invalid WebAuthn assertion payload".to_string()))?;
     let client_data_json = decode_b64_any(&assertion.response.client_data_json)?;
     let client_data: ClientDataJson = serde_json::from_slice(&client_data_json)
-        .map_err(|_| AppError::Unauthorized("Invalid credentials".to_string()))?;
+        .map_err(|_| AppError::Unauthorized("Invalid WebAuthn clientDataJson".to_string()))?;
     if client_data.typ != "webauthn.get" {
-        return Err(AppError::Unauthorized("Invalid credentials".to_string()));
+        return Err(AppError::Unauthorized(
+            "Invalid WebAuthn ceremony type (expected webauthn.get)".to_string(),
+        ));
     }
-    verify_challenge(&claims.challenge, &client_data.challenge)
-        .map_err(|_| AppError::Unauthorized("Invalid credentials".to_string()))?;
-    verify_origin(&claims.origin, &client_data.origin)
-        .map_err(|_| AppError::Unauthorized("Invalid credentials".to_string()))?;
+    verify_challenge(&claims.challenge, &client_data.challenge).map_err(|e| {
+        AppError::Unauthorized(format!(
+            "WebAuthn challenge verification failed: {}",
+            app_error_message(e)
+        ))
+    })?;
+    verify_origin(&claims.origin, &client_data.origin).map_err(|e| {
+        AppError::Unauthorized(format!(
+            "WebAuthn origin verification failed: {}",
+            app_error_message(e)
+        ))
+    })?;
 
     let authenticator_data = decode_b64_any(&assertion.response.authenticator_data)?;
     let parsed = parse_auth_data(&authenticator_data, false)
-        .map_err(|_| AppError::Unauthorized("Invalid credentials".to_string()))?;
-    verify_rp_id_hash(&claims.rp_id, &parsed.rp_id_hash)
-        .map_err(|_| AppError::Unauthorized("Invalid credentials".to_string()))?;
+        .map_err(|e| AppError::Unauthorized(format!("Invalid WebAuthn authData: {}", app_error_message(e))))?;
+    verify_rp_id_hash(&claims.rp_id, &parsed.rp_id_hash).map_err(|e| {
+        AppError::Unauthorized(format!(
+            "WebAuthn rpId verification failed: {}",
+            app_error_message(e)
+        ))
+    })?;
 
     let credential_id_raw = match assertion.raw_id.or(assertion.id) {
         Some(raw) => decode_b64_any(&raw)?,
         None => {
-            return Err(AppError::Unauthorized("Invalid credentials".to_string()));
+            return Err(AppError::Unauthorized(
+                "Missing WebAuthn credential id in assertion".to_string(),
+            ));
         }
     };
     let credential_id_b64url = encode_b64url(&credential_id_raw);
     let stored = get_stored_credential_by_credential_id(db, &credential_id_b64url)
         .await?
-        .ok_or_else(|| AppError::Unauthorized("Invalid credentials".to_string()))?;
+        .ok_or_else(|| {
+            AppError::Unauthorized(
+                "WebAuthn credential id is not registered on this server".to_string(),
+            )
+        })?;
 
     let public_key_cose = decode_b64_any(&stored.public_key_cose_b64)?;
     let verifying_key = parse_p256_verifying_key(&public_key_cose)
-        .map_err(|_| AppError::Unauthorized("Invalid credentials".to_string()))?;
+        .map_err(|_| AppError::Unauthorized("Invalid WebAuthn credential public key".to_string()))?;
 
     let signature = decode_b64_any(&assertion.response.signature)?;
     let signature = Signature::from_der(&signature)
-        .map_err(|_| AppError::Unauthorized("Invalid credentials".to_string()))?;
+        .map_err(|_| AppError::Unauthorized("Invalid WebAuthn assertion signature format".to_string()))?;
 
     let mut signed_data = Vec::with_capacity(authenticator_data.len() + 32);
     signed_data.extend_from_slice(&authenticator_data);
     signed_data.extend_from_slice(&Sha256::digest(&client_data_json));
     verifying_key
         .verify(&signed_data, &signature)
-        .map_err(|_| AppError::Unauthorized("Invalid credentials".to_string()))?;
+        .map_err(|_| AppError::Unauthorized("WebAuthn signature verification failed".to_string()))?;
 
     let new_sign_count = parsed.sign_count as i64;
     let old_sign_count = stored.sign_count;
     if old_sign_count > 0 && new_sign_count > 0 && new_sign_count <= old_sign_count {
-        return Err(AppError::Unauthorized("Invalid credentials".to_string()));
+        return Err(AppError::Unauthorized(
+            "WebAuthn sign counter did not increase (possible replay)".to_string(),
+        ));
     }
     if new_sign_count > old_sign_count {
         db.prepare(
@@ -1216,14 +1405,22 @@ fn map_get_bytes<'a>(map: &'a [(CborValue, CborValue)], key: i128) -> Option<&'a
 async fn list_stored_credentials(
     db: &D1Database,
     user_id: &str,
+    credential_use: &str,
 ) -> Result<Vec<StoredCredentialRow>, AppError> {
+    let usage_clause = if credential_use == WEBAUTHN_USE_LOGIN {
+        "('login', 'both')"
+    } else {
+        "('2fa', 'both')"
+    };
+    let sql = format!(
+        "SELECT slot_id, credential_id_b64url, public_key_cose_b64, sign_count, name
+         FROM two_factor_webauthn
+         WHERE user_id = ?1 AND credential_use IN {}
+         ORDER BY slot_id ASC",
+        usage_clause
+    );
     let rows: Vec<Value> = db
-        .prepare(
-            "SELECT slot_id, credential_id_b64url, public_key_cose_b64, sign_count, name
-             FROM two_factor_webauthn
-             WHERE user_id = ?1
-             ORDER BY slot_id ASC",
-        )
+        .prepare(&sql)
         .bind(&[user_id.into()])?
         .all()
         .await
@@ -1266,14 +1463,22 @@ async fn get_stored_credential(
     db: &D1Database,
     user_id: &str,
     credential_id_b64url: &str,
+    credential_use: &str,
 ) -> Result<Option<StoredCredentialRow>, AppError> {
+    let usage_clause = if credential_use == WEBAUTHN_USE_LOGIN {
+        "('login', 'both')"
+    } else {
+        "('2fa', 'both')"
+    };
+    let sql = format!(
+        "SELECT slot_id, credential_id_b64url, public_key_cose_b64, sign_count, name
+         FROM two_factor_webauthn
+         WHERE user_id = ?1 AND credential_id_b64url = ?2 AND credential_use IN {}
+         LIMIT 1",
+        usage_clause
+    );
     let row: Option<Value> = db
-        .prepare(
-            "SELECT slot_id, credential_id_b64url, public_key_cose_b64, sign_count, name
-             FROM two_factor_webauthn
-             WHERE user_id = ?1 AND credential_id_b64url = ?2
-             LIMIT 1",
-        )
+        .prepare(&sql)
         .bind(&[user_id.into(), credential_id_b64url.into()])?
         .first(None)
         .await
@@ -1320,7 +1525,7 @@ async fn get_stored_credential_by_credential_id(
         .prepare(
             "SELECT user_id, slot_id, public_key_cose_b64, sign_count, encrypted_user_key, encrypted_private_key
              FROM two_factor_webauthn
-             WHERE credential_id_b64url = ?1
+             WHERE credential_id_b64url = ?1 AND credential_use IN ('login', 'both')
              LIMIT 1",
         )
         .bind(&[credential_id_b64url.into()])?
@@ -1374,16 +1579,35 @@ async fn upsert_credential(
     credential_id_raw: &[u8],
     credential_public_key_cose: &[u8],
     sign_count: i64,
+    credential_use: &str,
 ) -> Result<(), AppError> {
     let now = Utc::now().to_rfc3339();
     let credential_id_b64url = encode_b64url(credential_id_raw);
     let public_key_cose_b64 = general_purpose::STANDARD.encode(credential_public_key_cose);
+    let slot_existing: Option<String> = db
+        .prepare(
+            "SELECT credential_id_b64url
+             FROM two_factor_webauthn
+             WHERE user_id = ?1 AND slot_id = ?2
+             LIMIT 1",
+        )
+        .bind(&[user_id.into(), f64::from(slot_id).into()])?
+        .first(Some("credential_id_b64url"))
+        .await
+        .map_err(|_| AppError::Database)?;
+    if let Some(existing) = slot_existing {
+        if existing != credential_id_b64url {
+            return Err(AppError::BadRequest(
+                "WebAuthn key slot is already occupied".to_string(),
+            ));
+        }
+    }
     db.prepare(
         "INSERT INTO two_factor_webauthn (
             user_id, slot_id, name, credential_id_b64url, public_key_cose_b64, sign_count,
-            prf_status, encrypted_public_key, encrypted_user_key, encrypted_private_key,
+            prf_status, encrypted_public_key, encrypted_user_key, encrypted_private_key, credential_use,
             created_at, updated_at
-         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
          ON CONFLICT(user_id, slot_id) DO UPDATE SET
             name = excluded.name,
             credential_id_b64url = excluded.credential_id_b64url,
@@ -1393,6 +1617,7 @@ async fn upsert_credential(
             encrypted_public_key = excluded.encrypted_public_key,
             encrypted_user_key = excluded.encrypted_user_key,
             encrypted_private_key = excluded.encrypted_private_key,
+            credential_use = excluded.credential_use,
             updated_at = excluded.updated_at",
     )
     .bind(&[
@@ -1406,6 +1631,7 @@ async fn upsert_credential(
         JsValue::NULL.into(),
         JsValue::NULL.into(),
         JsValue::NULL.into(),
+        credential_use.into(),
         now.clone().into(),
         now.into(),
     ])?
