@@ -86,6 +86,7 @@ fn generate_tokens_and_response(
         email: user.email.clone(),
         email_verified: true,
         amr: vec!["Application".into()],
+        device: None,
     };
 
     let jwt_secret = env.secret("JWT_SECRET")?.to_string();
@@ -102,6 +103,7 @@ fn generate_tokens_and_response(
         email: user.email.clone(),
         email_verified: true,
         amr: vec!["Application".into()],
+        device: None,
     };
     let jwt_refresh_secret = env.secret("JWT_REFRESH_SECRET")?.to_string();
     let refresh_token = jwt::encode_hs256(&refresh_claims, &jwt_refresh_secret)?;
