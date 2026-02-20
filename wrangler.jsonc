@@ -9,7 +9,7 @@
   "d1_databases": [
     {
       "binding": "vault1",
-      "database_id": "8dcbaed4-6fdc-4b14-9f90-20650a732b38"
+      "database_id": "cafc09f3-6614-40bb-9ce3-433521be70bd"
     }
   ],
 
@@ -46,6 +46,6 @@
   "assets": {
     "directory": "./static/web-vault",
     "not_found_handling": "single-page-application",
-    "run_worker_first": ["/api/*", "/identity/*", "/sends/*", "/notifications/*", "/demo.html"]
+    "run_worker_first": ["/api/*", "/identity/*", "/sends/*", "/notifications/*", "/demo.html", "/icons/*"]
   }
 }

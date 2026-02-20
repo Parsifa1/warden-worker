@@ -8,8 +8,8 @@ use std::sync::Arc;
 use worker::Env;
 
 use crate::handlers::{
-    accounts, ciphers, config, devices, folders, identity, import, sends, sync, two_factor, usage,
-    webauthn,
+    accounts, ciphers, config, devices, folders, icons, identity, import, sends, sync,
+    two_factor, usage, webauthn,
 };
 
 pub fn api_router(env: Env) -> Router {
@@ -20,6 +20,7 @@ pub fn api_router(env: Env) -> Router {
             "/demo.html",
             get(|| async { Html(include_str!("../static/demo.html")) }),
         )
+        .route("/icons/{*path}", get(icons::get_icon))
         // Identity/Auth routes
         .route("/identity/accounts/prelogin", post(accounts::prelogin))
         .route("/api/accounts/prelogin", post(accounts::prelogin))
