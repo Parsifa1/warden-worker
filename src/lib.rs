@@ -4,11 +4,9 @@ use worker::*;
 
 mod core;
 mod handlers;
-mod jwt;
 mod models;
 mod router;
-pub use core::{auth, crypto, db, error, two_factor};
-mod webauthn;
+pub use core::{auth, crypto, db, error, jwt, two_factor, webauthn};
 
 #[event(fetch)]
 pub async fn main(
