@@ -1,4 +1,4 @@
-use axum::http::{HeaderMap, StatusCode};
+use axum::http::{header, HeaderMap, StatusCode};
 use axum::response::Response;
 use axum::{extract::State, response::IntoResponse, Form, Json};
 use base64::{engine::general_purpose, Engine as _};
@@ -43,7 +43,9 @@ pub struct TokenRequest {
     token: Option<String>,
     #[serde(rename = "deviceResponse")]
     device_response: Option<String>,
+    #[allow(dead_code)]
     scope: Option<String>,
+    #[allow(dead_code)]
     client_id: Option<String>,
     #[serde(rename = "deviceIdentifier")]
     device_identifier: Option<String>,
@@ -202,6 +204,34 @@ fn generate_remember_token() -> String {
     general_purpose::URL_SAFE_NO_PAD.encode(bytes)
 }
 
+fn get_cookie(headers: &HeaderMap, name: &str) -> Option<String> {
+    let raw = headers.get(header::COOKIE)?.to_str().ok()?;
+    for part in raw.split(';') {
+        let part = part.trim();
+        if let Some((k, v)) = part.split_once('=') {
+            if k.trim() == name {
+                return Some(v.trim().to_string());
+            }
+        }
+    }
+    None
+}
+
+fn set_cookie(
+    headers: &mut axum::http::HeaderMap,
+    name: &str,
+    value: &str,
+    max_age_seconds: i64,
+) -> Result<(), AppError> {
+    let cookie =
+        format!("{name}={value}; Max-Age={max_age_seconds}; Path=/; HttpOnly; Secure; SameSite=Lax");
+    headers.append(
+        header::SET_COOKIE,
+        cookie.parse().map_err(|_| AppError::Internal)?,
+    );
+    Ok(())
+}
+
 async fn two_factor_metadata(
     db: &worker::D1Database,
     user_id: &str,
@@ -222,7 +252,14 @@ async fn two_factor_metadata(
         let rp_id = webauthn::rp_id_from_headers(headers);
         let origin = webauthn::origin_from_headers(headers);
         if let Some(challenge) =
-            webauthn::issue_login_challenge(db, user_id, &rp_id, &origin).await?
+            webauthn::issue_login_challenge(
+                db,
+                user_id,
+                &rp_id,
+                &origin,
+                webauthn::WEBAUTHN_USE_2FA,
+            )
+            .await?
         {
             providers.push(webauthn::TWO_FACTOR_PROVIDER_WEBAUTHN.to_string());
             providers2.insert(
@@ -384,7 +421,12 @@ pub async fn token(
                         return two_factor_required_response(&db, &user.id, &headers).await;
                     };
 
-                    if webauthn::verify_login_assertion(&db, &user.id, token)
+                    if webauthn::verify_login_assertion(
+                        &db,
+                        &user.id,
+                        token,
+                        webauthn::WEBAUTHN_USE_2FA,
+                    )
                         .await
                         .is_err()
                     {
@@ -443,7 +485,34 @@ pub async fn token(
                 }
             }
 
-            Ok(Json(response).into_response())
+            let access_token_to_set = response
+                .get("access_token")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string());
+            let refresh_token_to_set = response
+                .get("refresh_token")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string());
+
+            let mut resp = Json(response).into_response();
+            if let Some(v) = access_token_to_set.as_deref() {
+                set_cookie(
+                    resp.headers_mut(),
+                    "bw_access_token",
+                    v,
+                    Duration::hours(2).num_seconds(),
+                )?;
+            }
+            if let Some(v) = refresh_token_to_set.as_deref() {
+                set_cookie(
+                    resp.headers_mut(),
+                    "bw_refresh_token",
+                    v,
+                    Duration::days(30).num_seconds(),
+                )?;
+            }
+
+            Ok(resp)
         }
         "webauthn" => {
             let challenge_token = payload
@@ -460,7 +529,12 @@ pub async fn token(
                 &jwt_secret,
             )
             .await
-            .map_err(|_| AppError::Unauthorized("Invalid credentials".to_string()))?;
+            .map_err(|e| match e {
+                AppError::BadRequest(msg) | AppError::Unauthorized(msg) => {
+                    AppError::Unauthorized(msg)
+                }
+                other => other,
+            })?;
             let user_id = login_result.user_id.clone();
 
             let user: Value = db
@@ -468,8 +542,8 @@ pub async fn token(
                 .bind(&[user_id.clone().into()])?
                 .first(None)
                 .await
-                .map_err(|_| AppError::Unauthorized("Invalid credentials".to_string()))?
-                .ok_or_else(|| AppError::Unauthorized("Invalid credentials".to_string()))?;
+                .map_err(|_| AppError::Unauthorized("Invalid WebAuthn credentials".to_string()))?
+                .ok_or_else(|| AppError::Unauthorized("Invalid WebAuthn credentials".to_string()))?;
             let user: User = serde_json::from_value(user).map_err(|_| AppError::Internal)?;
 
             let device_identifier = payload.device_identifier.clone();
@@ -524,11 +598,39 @@ pub async fn token(
                 }
             }
 
-            Ok(Json(response).into_response())
+            let access_token_to_set = response
+                .get("access_token")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string());
+            let refresh_token_to_set = response
+                .get("refresh_token")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string());
+
+            let mut resp = Json(response).into_response();
+            if let Some(v) = access_token_to_set.as_deref() {
+                set_cookie(
+                    resp.headers_mut(),
+                    "bw_access_token",
+                    v,
+                    Duration::hours(2).num_seconds(),
+                )?;
+            }
+            if let Some(v) = refresh_token_to_set.as_deref() {
+                set_cookie(
+                    resp.headers_mut(),
+                    "bw_refresh_token",
+                    v,
+                    Duration::days(30).num_seconds(),
+                )?;
+            }
+
+            Ok(resp)
         }
         "refresh_token" => {
             let refresh_token = payload
                 .refresh_token
+                .or_else(|| get_cookie(&headers, "bw_refresh_token"))
                 .ok_or_else(|| AppError::BadRequest("Missing refresh_token".to_string()))?;
 
             let jwt_refresh_secret = env.secret("JWT_REFRESH_SECRET")?.to_string();
@@ -546,7 +648,24 @@ pub async fn token(
             let user: User = serde_json::from_value(user).map_err(|_| AppError::Internal)?;
 
             let response = generate_tokens_and_response(user, &env, None)?;
-            Ok(Json(response).into_response())
+            let mut resp = Json(response.clone()).into_response();
+            if let Some(v) = response.get("access_token").and_then(|v| v.as_str()) {
+                set_cookie(
+                    resp.headers_mut(),
+                    "bw_access_token",
+                    v,
+                    Duration::hours(2).num_seconds(),
+                )?;
+            }
+            if let Some(v) = response.get("refresh_token").and_then(|v| v.as_str()) {
+                set_cookie(
+                    resp.headers_mut(),
+                    "bw_refresh_token",
+                    v,
+                    Duration::days(30).num_seconds(),
+                )?;
+            }
+            Ok(resp)
         }
         _ => Err(AppError::BadRequest("Unsupported grant_type".to_string())),
     }
