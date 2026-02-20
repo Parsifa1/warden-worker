@@ -2,14 +2,12 @@ use tower_http::cors::{Any, CorsLayer};
 use tower_service::Service;
 use worker::*;
 
-mod auth;
-mod crypto;
-mod db;
-mod error;
+mod core;
 mod handlers;
 mod models;
 mod router;
-mod two_factor;
+
+pub use core::{auth, crypto, db, error, two_factor};
 
 #[event(fetch)]
 pub async fn main(

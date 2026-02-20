@@ -1,4 +1,4 @@
-use crate::error::AppError;
+use crate::core::error::AppError;
 use std::sync::Arc;
 use worker::{D1Database, Env};
 
