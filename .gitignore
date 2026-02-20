@@ -4,3 +4,4 @@ node_modules
 vaultwarden
 keyguard-app-master
 log
+.dev.vars
