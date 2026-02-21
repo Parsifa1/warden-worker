@@ -632,6 +632,11 @@ pub fn origin_from_headers(headers: &HeaderMap) -> String {
             return normalized;
         }
     }
+    if let Some(referer) = header_first_token(headers, "referer") {
+        if let Some(normalized) = normalize_origin(&referer) {
+            return normalized;
+        }
+    }
 
     let host = header_first_token(headers, "x-forwarded-host")
         .or_else(|| header_first_token(headers, "host"))
