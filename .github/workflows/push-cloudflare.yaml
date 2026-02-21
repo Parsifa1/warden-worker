@@ -32,20 +32,14 @@ jobs:
             - run: rustup target add wasm32-unknown-unknown
             - name: Install lld
               run: sudo apt install -y lld clang gcc llvm
-
-            - name: Install worker-build
-              run: |
-                  if ! command -v worker-build &> /dev/null; then
-                    cargo install worker-build
-                  fi
-
+            - uses: taiki-e/install-action@v2
+              with:
+                tool: worker-build
             - name: Replace D1_DATABASE_ID in wrangler.jsonc
               run: |
                   sed -i 's/"database_id": "[^"]*"/"database_id": "${{ secrets.D1_DATABASE_ID }}"/g' wrangler.jsonc
-            
             - name: Build worker
               run: worker-build --release
-            
             - uses: cloudflare/wrangler-action@v3
               id: cf
               env:
