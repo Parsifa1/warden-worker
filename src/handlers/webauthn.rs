@@ -304,8 +304,8 @@ pub async fn webauthn_assertion_options(
         &origin,
         webauthn::WEBAUTHN_USE_LOGIN,
     )
-        .await?
-        .ok_or_else(|| AppError::BadRequest("No WebAuthn credentials registered".to_string()))?;
+    .await?
+    .ok_or_else(|| AppError::BadRequest("No WebAuthn credentials registered".to_string()))?;
 
     let token = options
         .get("challenge")

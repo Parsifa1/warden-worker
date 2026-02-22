@@ -113,11 +113,7 @@ pub async fn post_profile(
     let now = Utc::now().to_rfc3339();
 
     db.prepare("UPDATE users SET name = ?1, updated_at = ?2 WHERE id = ?3")
-        .bind(&[
-            name.into(),
-            now.into(),
-            claims.sub.clone().into(),
-        ])?
+        .bind(&[name.into(), now.into(), claims.sub.clone().into()])?
         .run()
         .await
         .map_err(|_| AppError::Database)?;
@@ -145,15 +141,11 @@ pub async fn post_security_stamp(
         .map_err(|_| AppError::Database)?;
 
     let two_factor_enabled = two_factor::is_authenticator_enabled(&db, &claims.sub).await?;
-    let user: User = query!(
-        &db,
-        "SELECT * FROM users WHERE id = ?1",
-        claims.sub
-    )
-    .map_err(|_| AppError::Database)?
-    .first(None)
-    .await?
-    .ok_or(AppError::NotFound("User not found".to_string()))?;
+    let user: User = query!(&db, "SELECT * FROM users WHERE id = ?1", claims.sub)
+        .map_err(|_| AppError::Database)?
+        .first(None)
+        .await?
+        .ok_or(AppError::NotFound("User not found".to_string()))?;
 
     Ok(Json(json!({
         "id": user.id,
@@ -440,7 +432,8 @@ pub async fn update_avatar(
     if let Some(ref color) = payload.avatar_color {
         if color.len() != 7 {
             return Err(AppError::BadRequest(
-                "The field AvatarColor must be a HTML/Hex color code with a length of 7 characters".to_string()
+                "The field AvatarColor must be a HTML/Hex color code with a length of 7 characters"
+                    .to_string(),
             ));
         }
     }
@@ -460,15 +453,11 @@ pub async fn update_avatar(
 
     let two_factor_enabled = two_factor::is_authenticator_enabled(&db, &claims.sub).await?
         || webauthn::is_webauthn_enabled(&db, &claims.sub).await?;
-    let user: User = query!(
-        &db,
-        "SELECT * FROM users WHERE id = ?1",
-        claims.sub
-    )
-    .map_err(|_| AppError::Database)?
-    .first(None)
-    .await?
-    .ok_or(AppError::NotFound("User not found".to_string()))?;
+    let user: User = query!(&db, "SELECT * FROM users WHERE id = ?1", claims.sub)
+        .map_err(|_| AppError::Database)?
+        .first(None)
+        .await?
+        .ok_or(AppError::NotFound("User not found".to_string()))?;
 
     Ok(Json(json!({
         "id": user.id,

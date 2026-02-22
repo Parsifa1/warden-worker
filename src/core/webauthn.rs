@@ -9,8 +9,8 @@ use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::io::Cursor;
 use uuid::Uuid;
-use worker::D1Database;
 use worker::wasm_bindgen::JsValue;
+use worker::D1Database;
 
 use crate::{error::AppError, jwt};
 
@@ -446,10 +446,10 @@ pub async fn list_webauthn_api_items(
             .and_then(|v| v.as_str())
             .unwrap_or_default()
             .to_string();
-        let prf_status_raw = row
-            .get("prf_status")
-            .and_then(|v| v.as_i64())
-            .unwrap_or(i64::from(WEBAUTHN_PRF_STATUS_UNSUPPORTED)) as i32;
+        let prf_status_raw =
+            row.get("prf_status")
+                .and_then(|v| v.as_i64())
+                .unwrap_or(i64::from(WEBAUTHN_PRF_STATUS_UNSUPPORTED)) as i32;
         let encrypted_public_key = row
             .get("encrypted_public_key")
             .and_then(|v| v.as_str())
@@ -1009,8 +1009,12 @@ pub async fn verify_passwordless_login_assertion(
     })?;
 
     let authenticator_data = decode_b64_any(&assertion.response.authenticator_data)?;
-    let parsed = parse_auth_data(&authenticator_data, false)
-        .map_err(|e| AppError::Unauthorized(format!("Invalid WebAuthn authData: {}", app_error_message(e))))?;
+    let parsed = parse_auth_data(&authenticator_data, false).map_err(|e| {
+        AppError::Unauthorized(format!(
+            "Invalid WebAuthn authData: {}",
+            app_error_message(e)
+        ))
+    })?;
     verify_rp_id_hash(&claims.rp_id, &parsed.rp_id_hash).map_err(|e| {
         AppError::Unauthorized(format!(
             "WebAuthn rpId verification failed: {}",
@@ -1036,19 +1040,23 @@ pub async fn verify_passwordless_login_assertion(
         })?;
 
     let public_key_cose = decode_b64_any(&stored.public_key_cose_b64)?;
-    let verifying_key = parse_p256_verifying_key(&public_key_cose)
-        .map_err(|_| AppError::Unauthorized("Invalid WebAuthn credential public key".to_string()))?;
+    let verifying_key = parse_p256_verifying_key(&public_key_cose).map_err(|_| {
+        AppError::Unauthorized("Invalid WebAuthn credential public key".to_string())
+    })?;
 
     let signature = decode_b64_any(&assertion.response.signature)?;
-    let signature = Signature::from_der(&signature)
-        .map_err(|_| AppError::Unauthorized("Invalid WebAuthn assertion signature format".to_string()))?;
+    let signature = Signature::from_der(&signature).map_err(|_| {
+        AppError::Unauthorized("Invalid WebAuthn assertion signature format".to_string())
+    })?;
 
     let mut signed_data = Vec::with_capacity(authenticator_data.len() + 32);
     signed_data.extend_from_slice(&authenticator_data);
     signed_data.extend_from_slice(&Sha256::digest(&client_data_json));
     verifying_key
         .verify(&signed_data, &signature)
-        .map_err(|_| AppError::Unauthorized("WebAuthn signature verification failed".to_string()))?;
+        .map_err(|_| {
+            AppError::Unauthorized("WebAuthn signature verification failed".to_string())
+        })?;
 
     let new_sign_count = parsed.sign_count as i64;
     let old_sign_count = stored.sign_count;
@@ -1081,7 +1089,9 @@ pub async fn verify_passwordless_login_assertion(
     })
 }
 
-pub fn extract_assertion_credential_id_b64url(assertion_token_json: &str) -> Result<String, AppError> {
+pub fn extract_assertion_credential_id_b64url(
+    assertion_token_json: &str,
+) -> Result<String, AppError> {
     let assertion: WebAuthnAssertionToken = serde_json::from_str(assertion_token_json)
         .map_err(|_| AppError::BadRequest("Invalid WebAuthn assertion".to_string()))?;
     let credential_id_raw = match assertion.raw_id.or(assertion.id) {

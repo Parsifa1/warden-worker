@@ -8,8 +8,8 @@ use std::sync::Arc;
 use worker::Env;
 
 use crate::handlers::{
-    accounts, ciphers, config, devices, folders, icons, identity, import, sends, sync,
-    two_factor, usage, webauthn,
+    accounts, ciphers, config, devices, folders, icons, identity, import, sends, sync, two_factor,
+    usage, webauthn,
 };
 
 pub fn api_router(env: Env) -> Router {

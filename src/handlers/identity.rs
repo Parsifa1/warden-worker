@@ -13,9 +13,7 @@ use std::sync::Arc;
 use uuid::Uuid;
 use worker::Env;
 
-use crate::{
-    auth::Claims, db, error::AppError, jwt, models::user::User, two_factor, webauthn,
-};
+use crate::{auth::Claims, db, error::AppError, jwt, models::user::User, two_factor, webauthn};
 
 fn deserialize_trimmed_i32_opt<'de, D>(deserializer: D) -> Result<Option<i32>, D::Error>
 where
@@ -223,8 +221,9 @@ fn set_cookie(
     value: &str,
     max_age_seconds: i64,
 ) -> Result<(), AppError> {
-    let cookie =
-        format!("{name}={value}; Max-Age={max_age_seconds}; Path=/; HttpOnly; Secure; SameSite=Lax");
+    let cookie = format!(
+        "{name}={value}; Max-Age={max_age_seconds}; Path=/; HttpOnly; Secure; SameSite=Lax"
+    );
     headers.append(
         header::SET_COOKIE,
         cookie.parse().map_err(|_| AppError::Internal)?,
@@ -251,15 +250,14 @@ async fn two_factor_metadata(
     if webauthn::is_webauthn_enabled(db, user_id).await? {
         let rp_id = webauthn::rp_id_from_headers(headers);
         let origin = webauthn::origin_from_headers(headers);
-        if let Some(challenge) =
-            webauthn::issue_login_challenge(
-                db,
-                user_id,
-                &rp_id,
-                &origin,
-                webauthn::WEBAUTHN_USE_2FA,
-            )
-            .await?
+        if let Some(challenge) = webauthn::issue_login_challenge(
+            db,
+            user_id,
+            &rp_id,
+            &origin,
+            webauthn::WEBAUTHN_USE_2FA,
+        )
+        .await?
         {
             providers.push(webauthn::TWO_FACTOR_PROVIDER_WEBAUTHN.to_string());
             providers2.insert(
@@ -427,8 +425,8 @@ pub async fn token(
                         token,
                         webauthn::WEBAUTHN_USE_2FA,
                     )
-                        .await
-                        .is_err()
+                    .await
+                    .is_err()
                     {
                         return invalid_two_factor_response(&db, &user.id, &headers).await;
                     }
@@ -543,7 +541,9 @@ pub async fn token(
                 .first(None)
                 .await
                 .map_err(|_| AppError::Unauthorized("Invalid WebAuthn credentials".to_string()))?
-                .ok_or_else(|| AppError::Unauthorized("Invalid WebAuthn credentials".to_string()))?;
+                .ok_or_else(|| {
+                    AppError::Unauthorized("Invalid WebAuthn credentials".to_string())
+                })?;
             let user: User = serde_json::from_value(user).map_err(|_| AppError::Internal)?;
 
             let device_identifier = payload.device_identifier.clone();
@@ -566,8 +566,7 @@ pub async fn token(
                 _ => None,
             };
 
-            let response =
-                generate_tokens_and_response(user, &env, webauthn_prf_option.as_ref())?;
+            let response = generate_tokens_and_response(user, &env, webauthn_prf_option.as_ref())?;
 
             if let Some(device_identifier) = device_identifier.as_deref() {
                 ensure_devices_table(&db).await?;
