@@ -1648,7 +1648,8 @@ async fn upsert_pending_challenge(
     origin: &str,
 ) -> Result<(), AppError> {
     let now = Utc::now();
-    let expires_at = (now + Duration::seconds(CHALLENGE_TTL_SECONDS)).to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+    let expires_at = (now + Duration::seconds(CHALLENGE_TTL_SECONDS))
+        .to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
     let now = now.to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
     db.prepare(
         "INSERT INTO webauthn_challenges (

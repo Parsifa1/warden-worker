@@ -92,7 +92,8 @@ pub(crate) async fn ensure_device_management_tables(
 }
 
 pub(crate) async fn purge_expired_auth_requests(db: &worker::D1Database) -> Result<(), AppError> {
-    let cutoff = (Utc::now() - Duration::minutes(15)).to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+    let cutoff =
+        (Utc::now() - Duration::minutes(15)).to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
     db.prepare("DELETE FROM auth_requests WHERE creation_date < ?1")
         .bind(&[cutoff.into()])?
         .run()

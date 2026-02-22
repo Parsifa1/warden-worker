@@ -1,5 +1,5 @@
 use axum::{extract::State, Json};
-use serde_json::Value;
+use serde_json::{json, Value};
 use std::sync::Arc;
 use worker::Env;
 
@@ -11,7 +11,7 @@ use crate::{
         cipher::{Cipher, CipherDBModel},
         folder::{Folder, FolderResponse},
         send::{send_to_json, SendDBModel},
-        sync::{Profile, SyncResponse},
+        sync::Profile,
         user::User,
     },
     two_factor,
@@ -21,7 +21,7 @@ use crate::{
 pub async fn get_sync_data(
     claims: Claims,
     State(env): State<Arc<Env>>,
-) -> Result<Json<SyncResponse>, AppError> {
+) -> Result<Json<Value>, AppError> {
     let user_id = claims.sub;
     let db = db::get_db(&env)?;
 
@@ -83,7 +83,7 @@ pub async fn get_sync_data(
     let profile = Profile {
         id: user.id,
         name: user.name,
-        email: user.email,
+        email: user.email.clone(),
         master_password_hint: user.master_password_hint,
         security_stamp: user.security_stamp,
         object: "profile".to_string(),
@@ -94,22 +94,52 @@ pub async fn get_sync_data(
         two_factor_enabled: two_factor::is_authenticator_enabled(&db, &user_id).await?,
         uses_key_connector: false,
         creation_date: time,
-        key: user.key,
+        key: user.key.clone(),
         private_key: user.private_key,
         avatar_color: user.avatar_color,
     };
-
-
-    let response = SyncResponse {
-        profile,
-        folders,
-        ciphers,
-        sends,
-        domains: serde_json::Value::Null, // Ignored for basic implementation
-        object: "sync".to_string(),
-        collections: vec![], //Always empty because thereis no orgnization
-        policies: vec![], // Ignored for basic implementation
+    let master_password_unlock = if !user.master_password_hash.is_empty() {
+        json!({
+            "kdf": {
+                "kdfType": user.kdf_type,
+                "iterations": user.kdf_iterations,
+                "memory": null,
+                "parallelism": null
+            },
+            "masterKeyEncryptedUserKey": user.key,
+            "masterKeyWrappedUserKey": user.key,
+            "salt": user.email
+        })
+    } else {
+        Value::Null
     };
+
+    let keys = crate::webauthn::list_webauthn_api_items(&db, &user_id).await?;
+    let web_authn_prf_options = keys.into_iter().map(|k| {
+        json!({
+            "1":{
+                "encryptedPrivateKey": k.encrypted_private_key,
+                "encryptedUserKey": k.encrypted_user_key,
+                // "credentialId": k.credential_id,
+                "credentialId": [],
+                "transports": [],
+                }
+            })
+    }).collect::<Vec<_>>();
+    let response = json!({
+        "profile": profile,
+        "folders": folders,
+        "ciphers": ciphers,
+        "sends": sends,
+        "domains": serde_json::Value::Null,
+        "object": "sync".to_string(),
+        "collections": [],
+        "policies": [],
+        "userDecryption": {
+            "masterPasswordUnlock": master_password_unlock,
+            "webAuthnPrfOptions": web_authn_prf_options
+        }
+    });
 
     Ok(Json(response))
 }
