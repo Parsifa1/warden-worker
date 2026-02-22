@@ -5,3 +5,4 @@ pub mod error;
 pub mod jwt;
 pub mod two_factor;
 pub mod webauthn;
+pub mod notifications;
