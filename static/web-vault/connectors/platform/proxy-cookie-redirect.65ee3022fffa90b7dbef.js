@@ -1,0 +1,2 @@
+window.addEventListener("DOMContentLoaded",()=>{const o=window.location.origin;let t=`${window.location.origin}/api/sso-cookie-vendor`;o.startsWith("https://localhost")&&(t="http://localhost:4000/sso-cookie-vendor"),window.location.href=t});
+//# sourceMappingURL=proxy-cookie-redirect.65ee3022fffa90b7dbef.js.map

@@ -1,0 +1,109 @@
+/* ============================================
+   Vaultwarden 自定义登录界面样式
+   功能：只显示邮箱、记住邮箱、登录、注册
+   ============================================ */
+
+/* --------------------------------------------
+   1. 隐藏所有额外的登录方式按钮
+   -------------------------------------------- */
+
+/* 隐藏 "Use single sign-on" 按钮 */
+.vw-sso-login {
+  display: none !important;
+}
+
+/* 隐藏 "Other" 登录方式按钮 */
+.vw-other-login {
+  display: none !important;
+}
+
+/* 隐藏 "or" 分隔文本 */
+.vw-or-text {
+  display: none !important;
+}
+
+/* --------------------------------------------
+   2. 隐藏其他可能的干扰元素
+   -------------------------------------------- */
+
+/* 隐藏 SSO 专用邮箱输入（如果存在） */
+.vw-email-sso {
+  display: none !important;
+}
+
+/* 隐藏水平分隔线 */
+app-login form hr,
+app-login form .tw-border-t {
+  display: none !important;
+}
+
+/* --------------------------------------------
+   3. 确保主要登录表单元素正常显示
+   -------------------------------------------- */
+
+/* 确保邮箱输入框显示 */
+app-login form input[type="email"],
+app-login form input[name="email"],
+app-login form input[formcontrolname="email"],
+app-login form input[inputmode="email"] {
+  display: block !important;
+}
+
+/* 确保密码输入框显示 */
+app-login form input[type="password"],
+app-login form input[name="masterPassword"],
+app-login form input[formcontrolname="masterPassword"] {
+  display: block !important;
+}
+
+/* 确保 "Remember email" 复选框显示 */
+app-login form input[type="checkbox"][name="rememberEmail"],
+app-login form input[type="checkbox"][formcontrolname="rememberEmail"] {
+  display: inline-block !important;
+}
+
+/* 确保登录按钮显示 */
+app-login form button[type="submit"][buttontype="primary"] {
+  display: inline-flex !important;
+}
+
+/* 确保注册链接显示 */
+app-login form a[routerlink="/signup"],
+app-login form a[href*="/signup"] {
+  display: inline-flex !important;
+}
+
+/* --------------------------------------------
+   4. 登录表单布局优化
+   -------------------------------------------- */
+
+/* 简化登录表单容器 */
+app-login form {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+/* 确保表单分组正确显示 */
+app-login form .form-group,
+app-login form bit-form-field {
+  display: block !important;
+}
+
+/* ============================================
+   侧边栏自定义
+   ============================================ */
+
+/* --------------------------------------------
+   5. 隐藏侧边栏菜单项
+   -------------------------------------------- */
+
+/* 隐藏"域名规则"侧边栏菜单项 */
+[route="settings/domain-rules"] {
+  display: none !important;
+}
+
+/* 隐藏"紧急访问"侧边栏菜单项 */
+[route="settings/emergency-access"] {
+  display: none !important;
+}
