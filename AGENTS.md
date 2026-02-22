@@ -17,11 +17,38 @@ Warden Worker 是运行在 Cloudflare Workers 上的 Bitwarden 兼容服务端�
 **项目结构**：
 ```
 src/
-├── core/           # 核心功能（auth, crypto, db, error, jwt, two_factor, webauthn）
-├── handlers/       # API 处理器（accounts, ciphers, devices, folders, identity, sync 等）
-├── models/         # 数据模型（user, cipher, folder, send, sync）
+├── core/           # 核心功能模块
+│   ├── auth.rs         # JWT Claims 提取器（Axum FromRequestParts）
+│   ├── crypto.rs       # 密码哈希、加解密工具
+│   ├── db.rs           # D1 数据库连接辅助
+│   ├── error.rs        # AppError 统一错误类型
+│   ├── jwt.rs          # JWT 签发与验证
+│   ├── notifications.rs # Durable Objects 通知系统
+│   ├── two_factor.rs   # TOTP 验证逻辑
+│   └── webauthn.rs     # WebAuthn 注册与断言逻辑
+├── handlers/       # API 处理器
+│   ├── accounts.rs     # 账号注册、Profile、改密、改邮箱、头像
+│   ├── ciphers.rs      # 密码项 CRUD、软删除、恢复
+│   ├── config.rs       # /api/config、alive、version 等
+│   ├── devices.rs      # 设备管理、Auth Request 流程
+│   ├── folders.rs      # 文件夹 CRUD
+│   ├── icons.rs        # 网站图标代理
+│   ├── identity.rs     # 登录令牌、WebAuthn 无密码登录
+│   ├── import.rs       # 密码库导入
+│   ├── sends.rs        # Send（文本/文件）CRUD
+│   ├── sync.rs         # /api/sync 全量同步
+│   ├── two_factor.rs   # TOTP 2FA 管理
+│   ├── usage.rs        # D1 用量查询
+│   └── webauthn.rs     # WebAuthn / 通行密钥管理
+├── models/         # 数据模型
+│   ├── cipher.rs       # Cipher 密码项模型
+│   ├── folder.rs       # 文件夹模型
+│   ├── import.rs       # 导入数据模型
+│   ├── send.rs         # Send 模型
+│   ├── sync.rs         # 同步响应模型
+│   └── user.rs         # 用户模型
+├── static/         # 静态资源（demo.html、web-vault）
 ├── router.rs       # Axum 路由定义
-├── notifications.rs # Durable Objects 通知系统
 └── lib.rs          # 入口点
 ```
 
@@ -75,8 +102,8 @@ wrangler secret put TWO_FACTOR_ENC_KEY
 # 远程数据库初始化（警告：会清空数据）
 wrangler d1 execute vault1 --remote --file=sql/schema_full.sql
 
-# 执行迁移脚本
-wrangler d1 execute vault1 --remote --file=sql/migrations/20260216_add_avatar_color.sql
+# 执行迁移脚本（示例：最新迁移）
+wrangler d1 execute vault1 --remote --file=sql/migrations/20260220_split_webauthn_usage.sql
 
 # 本地数据库查询
 wrangler d1 execute vault1 --local --command="SELECT * FROM users LIMIT 5"
@@ -121,9 +148,9 @@ use uuid::Uuid;
 use worker::{query, Env};
 
 // 3. 内部模块（使用 crate::）
-use crate::auth::Claims;
-use crate::db;
-use crate::error::AppError;
+use crate::core::auth::Claims;
+use crate::core::db;
+use crate::core::error::AppError;
 use crate::models::user::User;
 ```
 
@@ -140,7 +167,7 @@ use crate::models::user::User;
 **使用 `AppError` 枚举统一错误类型**：
 
 ```rust
-use crate::error::AppError;
+use crate::core::error::AppError;
 
 // 函数签名
 pub async fn handler(claims: Claims, State(env): State<Arc<Env>>) -> Result<Json<Value>, AppError>
@@ -312,7 +339,7 @@ Router::new()
 
 ### 认证
 
-使用 `Claims` 提取器自动验证 JWT：
+使用 `Claims` 提取器自动验证 JWT（定义于 `src/core/auth.rs`）：
 
 ```rust
 pub async fn handler(claims: Claims, State(env): State<Arc<Env>>) -> Result<Json<Value>, AppError> {
@@ -320,6 +347,27 @@ pub async fn handler(claims: Claims, State(env): State<Arc<Env>>) -> Result<Json
     // ...
 }
 ```
+
+`Claims` 结构体包含：
+- `sub`：用户 ID
+- `email`：用户邮箱
+- `device`：设备标识符（登录后设置）
+- `exp` / `nbf`：JWT 过期/生效时间
+
+### WebAuthn
+
+WebAuthn 相关逻辑拆分为两个层次：
+- `src/core/webauthn.rs`：底层注册（attestation）与登录（assertion）验证逻辑
+- `src/handlers/webauthn.rs`：HTTP 接口，处理通行密钥的注册、管理和 2FA WebAuthn
+
+WebAuthn 凭据支持 PRF 扩展，可用于无主密码的客户端加密密钥派生。
+
+### 设备与 Auth Request 流程
+
+Auth Request 是官方客户端"通过已登录设备授权新设备"的机制，流程：
+1. 新设备发起 `POST /api/auth-requests`
+2. 已登录设备轮询 `GET /api/auth-requests/pending` 并通过 `PUT /api/auth-requests/{id}` 批准
+3. 新设备通过 `GET /api/auth-requests/{id}/response` 获取加密后的主密钥
 
 ### 环境变量和 Secrets
 
@@ -362,6 +410,8 @@ Ok(Json(json!({
 
 4. **敏感数据**：不在日志中输出密码、token、密钥
 
+5. **WebAuthn Referer 校验**：`core/webauthn.rs` 会校验请求来源，确保 origin 与服务端域名匹配
+
 ---
 
 ## 常见任务
@@ -371,7 +421,8 @@ Ok(Json(json!({
 1. 在 `src/handlers/` 创建或修改处理器函数
 2. 在 `src/router.rs` 添加路由
 3. 如需新数据模型，在 `src/models/` 定义
-4. 更新数据库 schema（如需要）
+4. 如需核心逻辑，在 `src/core/` 对应模块添加
+5. 更新数据库 schema（如需要）
 
 ### 数据库迁移
 
@@ -395,6 +446,7 @@ Ok(Json(json!({
 - ❌ 在日志中输出敏感信息
 - ❌ 硬编码密钥或凭证
 - ❌ 修改 `wrangler.jsonc` 中的 `database_id`（使用 Secrets 或环境变量）
+- ❌ 在 handler 中直接引用 `crate::auth` 等旧路径（核心模块已统一移至 `crate::core::*`）
 
 ---
 
@@ -404,3 +456,4 @@ Ok(Json(json!({
 - [worker-rs GitHub](https://github.com/cloudflare/workers-rs)
 - [Axum 文档](https://docs.rs/axum/)
 - [Bitwarden API 文档](https://bitwarden.com/help/api/)
+- [WebAuthn 规范](https://www.w3.org/TR/webauthn-3/)
