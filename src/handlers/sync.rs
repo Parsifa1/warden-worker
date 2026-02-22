@@ -99,6 +99,7 @@ pub async fn get_sync_data(
         avatar_color: user.avatar_color,
     };
 
+
     let response = SyncResponse {
         profile,
         folders,
@@ -106,6 +107,8 @@ pub async fn get_sync_data(
         sends,
         domains: serde_json::Value::Null, // Ignored for basic implementation
         object: "sync".to_string(),
+        collections: vec![], //Always empty because thereis no orgnization
+        policies: vec![], // Ignored for basic implementation
     };
 
     Ok(Json(response))

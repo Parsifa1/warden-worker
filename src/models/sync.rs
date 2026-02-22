@@ -35,16 +35,12 @@ pub struct Profile {
 
 #[derive(Debug, Serialize)]
 pub struct SyncResponse {
-    #[serde(rename = "profile")]
     pub profile: Profile,
-    #[serde(rename = "folders")]
     pub folders: Vec<FolderResponse>,
-    #[serde(rename = "ciphers")]
     pub ciphers: Vec<Cipher>,
-    #[serde(rename = "Sends")]
     pub sends: Vec<Value>,
-    #[serde(rename = "Domains")]
     pub domains: Value,
-    #[serde(rename = "Object")]
     pub object: String,
+    pub collections: Vec<Value>,
+    pub policies: Vec<Value>,
 }
