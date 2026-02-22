@@ -55,7 +55,8 @@ pub async fn config(headers: HeaderMap) -> Json<Value> {
           "vapidPublicKey": null
         },
         "featureStates": {
-            "unauth-ui-refresh": true
+            "unauth-ui-refresh": true,
+            "pm-2035-passkey-unlock": true,
         },
         "object": "config",
     }))

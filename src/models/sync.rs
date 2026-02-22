@@ -1,6 +1,4 @@
-use super::{cipher::Cipher, folder::FolderResponse};
 use serde::Serialize;
-use serde_json::Value;
 
 #[derive(Debug, Serialize)]
 pub struct Profile {
@@ -31,16 +29,4 @@ pub struct Profile {
     pub key: String,
     #[serde(rename = "avatarColor")]
     pub avatar_color: Option<String>,
-}
-
-#[derive(Debug, Serialize)]
-pub struct SyncResponse {
-    pub profile: Profile,
-    pub folders: Vec<FolderResponse>,
-    pub ciphers: Vec<Cipher>,
-    pub sends: Vec<Value>,
-    pub domains: Value,
-    pub object: String,
-    pub collections: Vec<Value>,
-    pub policies: Vec<Value>,
 }
