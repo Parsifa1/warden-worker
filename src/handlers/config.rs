@@ -1,5 +1,4 @@
 use axum::{http::HeaderMap, Json};
-use chrono::Utc;
 use serde_json::{json, Value};
 
 #[worker::send]
@@ -64,7 +63,7 @@ pub async fn config(headers: HeaderMap) -> Json<Value> {
 
 #[worker::send]
 pub async fn now() -> Json<String> {
-    Json(Utc::now().to_rfc3339())
+    Json(crate::utils::time_now())
 }
 
 #[worker::send]

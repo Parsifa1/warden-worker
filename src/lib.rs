@@ -6,8 +6,9 @@ use worker::*;
 mod core;
 mod handlers;
 mod models;
-
 mod router;
+mod utils;
+
 pub use core::{auth, crypto, db, error, jwt, notifications, two_factor, webauthn};
 
 #[event(fetch)]

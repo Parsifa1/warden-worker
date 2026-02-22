@@ -92,7 +92,7 @@ pub(crate) async fn ensure_device_management_tables(
 }
 
 pub(crate) async fn purge_expired_auth_requests(db: &worker::D1Database) -> Result<(), AppError> {
-    let cutoff = (Utc::now() - Duration::minutes(15)).to_rfc3339();
+    let cutoff = (Utc::now() - Duration::minutes(15)).to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
     db.prepare("DELETE FROM auth_requests WHERE creation_date < ?1")
         .bind(&[cutoff.into()])?
         .run()
@@ -453,7 +453,7 @@ pub async fn device_token(
         return Err(AppError::NotFound("No device found".to_string()));
     }
 
-    let now = Utc::now().to_rfc3339();
+    let now = crate::utils::time_now();
     db.prepare(
         "UPDATE devices
          SET push_token = ?1, updated_at = ?2
@@ -481,7 +481,7 @@ pub async fn clear_device_token(
     let db = db::get_db(&env)?;
     ensure_devices_table(&db).await?;
 
-    let now = Utc::now().to_rfc3339();
+    let now = crate::utils::time_now();
     db.prepare(
         "UPDATE devices
          SET push_token = NULL, updated_at = ?1
@@ -550,7 +550,7 @@ pub async fn post_auth_request(
     }
 
     let request_id = Uuid::new_v4().to_string();
-    let now = Utc::now().to_rfc3339();
+    let now = Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
     let request_ip = client_ip_from_headers(&headers);
     let access_code_hash = sha256_hex(&payload.access_code);
     let request_device_identifier = payload.device_identifier.clone();
@@ -682,7 +682,7 @@ pub async fn put_auth_request(
         }
     }
 
-    let now = Utc::now().to_rfc3339();
+    let now = crate::utils::time_now();
     let origin = origin_from_headers(&headers);
     let response_device_identifier = approver_device_identifier.to_string();
     let master_password_hash = to_js_val(payload.master_password_hash.clone());
@@ -699,7 +699,7 @@ pub async fn put_auth_request(
         )
         .bind(&[
             payload.key.into(),
-            master_password_hash.into(),
+            master_password_hash,
             response_device_identifier.into(),
             now.clone().into(),
             auth_request_id.clone().into(),

@@ -128,6 +128,17 @@ pub struct WebAuthnAssertionResponse {
     pub signature: String,
 }
 
+struct CredentialGroup<'a> {
+    db: &'a D1Database,
+    user_id: &'a str,
+    slot_id: i32,
+    name: &'a str,
+    credential_id_raw: &'a [u8],
+    credential_public_key_cose: &'a [u8],
+    sign_count: i64,
+    credential_use: &'a str,
+}
+
 pub async fn ensure_webauthn_tables(db: &D1Database) -> Result<(), AppError> {
     db.prepare(
         "CREATE TABLE IF NOT EXISTS two_factor_webauthn (
@@ -216,7 +227,7 @@ pub async fn ensure_webauthn_tables(db: &D1Database) -> Result<(), AppError> {
         }
     }
 
-    let now = Utc::now().to_rfc3339();
+    let now = crate::utils::time_now();
     let _ = db
         .prepare(
             "UPDATE two_factor_webauthn
@@ -321,7 +332,7 @@ pub async fn set_webauthn_two_factor_enabled(
     enabled: bool,
 ) -> Result<(), AppError> {
     ensure_webauthn_tables(db).await?;
-    let now = Utc::now().to_rfc3339();
+    let now = crate::utils::time_now();
     db.prepare(
         "INSERT INTO two_factor_webauthn_settings (user_id, enabled, created_at, updated_at)
          VALUES (?1, ?2, ?3, ?4)
@@ -523,10 +534,10 @@ pub async fn update_webauthn_prf_by_slot(
     )
     .bind(&[
         f64::from(prf_status).into(),
-        opt_str_to_js_value(encrypted_public_key).into(),
-        opt_str_to_js_value(encrypted_user_key).into(),
-        opt_str_to_js_value(encrypted_private_key).into(),
-        Utc::now().to_rfc3339().into(),
+        opt_str_to_js_value(encrypted_public_key),
+        opt_str_to_js_value(encrypted_user_key),
+        opt_str_to_js_value(encrypted_private_key),
+        crate::utils::time_now().into(),
         user_id.into(),
         f64::from(slot_id).into(),
     ])?
@@ -572,10 +583,10 @@ pub async fn update_webauthn_prf_by_credential_id(
     )
     .bind(&[
         f64::from(prf_status).into(),
-        opt_str_to_js_value(encrypted_public_key).into(),
-        opt_str_to_js_value(encrypted_user_key).into(),
-        opt_str_to_js_value(encrypted_private_key).into(),
-        Utc::now().to_rfc3339().into(),
+        opt_str_to_js_value(encrypted_public_key),
+        opt_str_to_js_value(encrypted_user_key),
+        opt_str_to_js_value(encrypted_private_key),
+        crate::utils::time_now().into(),
         user_id.into(),
         credential_id_b64url.into(),
     ])?
@@ -849,17 +860,17 @@ pub async fn register_webauthn_credential(
     verify_rp_id_hash(&pending.rp_id, &rp_id_hash)?;
     parse_p256_verifying_key(&credential_public_key_cose)?;
 
-    upsert_credential(
+    let cg = CredentialGroup {
         db,
         user_id,
         slot_id,
         name,
-        &credential_id,
-        &credential_public_key_cose,
-        sign_count as i64,
+        credential_id_raw: &credential_id,
+        credential_public_key_cose: &credential_public_key_cose,
+        sign_count: sign_count as i64,
         credential_use,
-    )
-    .await
+    };
+    upsert_credential(cg).await
 }
 
 pub async fn verify_login_assertion(
@@ -952,7 +963,7 @@ pub async fn verify_login_assertion(
         )
         .bind(&[
             (new_sign_count as f64).into(),
-            Utc::now().to_rfc3339().into(),
+            crate::utils::time_now().into(),
             user_id.into(),
             f64::from(stored.slot_id).into(),
         ])?
@@ -1073,7 +1084,7 @@ pub async fn verify_passwordless_login_assertion(
         )
         .bind(&[
             (new_sign_count as f64).into(),
-            Utc::now().to_rfc3339().into(),
+            crate::utils::time_now().into(),
             stored.user_id.clone().into(),
             f64::from(stored.slot_id).into(),
         ])?
@@ -1196,29 +1207,6 @@ fn strip_default_port(authority: &str, scheme: &str) -> String {
     authority
 }
 
-#[cfg(test)]
-mod tests {
-    use super::{normalize_origin, normalize_rp_id, verify_origin};
-
-    #[test]
-    fn normalize_origin_strips_default_https_port() {
-        let normalized = normalize_origin("https://example.com:443").expect("normalized");
-        assert_eq!(normalized, "https://example.com");
-    }
-
-    #[test]
-    fn verify_origin_accepts_default_port_equivalence() {
-        assert!(verify_origin("https://example.com:443", "https://example.com").is_ok());
-        assert!(verify_origin("http://example.com:80", "http://example.com/").is_ok());
-    }
-
-    #[test]
-    fn normalize_rp_id_strips_port() {
-        assert_eq!(normalize_rp_id("example.com:443"), "example.com");
-        assert_eq!(normalize_rp_id("[::1]:8443"), "::1");
-    }
-}
-
 fn verify_rp_id_hash(rp_id: &str, rp_id_hash: &[u8; 32]) -> Result<(), AppError> {
     let expected = Sha256::digest(rp_id.as_bytes());
     if expected.as_slice() == rp_id_hash {
@@ -1255,7 +1243,8 @@ fn encode_b64url(bytes: &[u8]) -> String {
     general_purpose::URL_SAFE_NO_PAD.encode(bytes)
 }
 
-fn parse_attestation_object(bytes: &[u8]) -> Result<([u8; 32], u32, Vec<u8>, Vec<u8>), AppError> {
+type AttestationData = ([u8; 32], u32, Vec<u8>, Vec<u8>);
+fn parse_attestation_object(bytes: &[u8]) -> Result<AttestationData, AppError> {
     let value: CborValue = ciborium::de::from_reader(Cursor::new(bytes))
         .map_err(|_| AppError::BadRequest("Invalid WebAuthn attestation".to_string()))?;
     let map = value
@@ -1387,33 +1376,20 @@ fn map_get_text<'a>(map: &'a [(CborValue, CborValue)], key: &str) -> Option<&'a 
 }
 
 fn map_get_i128(map: &[(CborValue, CborValue)], key: i128) -> Option<i128> {
-    map.iter().find_map(|(k, v)| {
-        let k = match k {
-            CborValue::Integer(i) => i128::try_from(*i).ok(),
-            _ => None,
-        }?;
-        if k == key {
-            match v {
-                CborValue::Integer(i) => i128::try_from(*i).ok(),
-                _ => None,
-            }
-        } else {
-            None
+    map.iter().find_map(|(k, v)| match (k, v) {
+        (CborValue::Integer(ki), CborValue::Integer(vi)) if i128::from(*ki) == key => {
+            Some(i128::from(*vi))
         }
+        _ => None,
     })
 }
 
-fn map_get_bytes<'a>(map: &'a [(CborValue, CborValue)], key: i128) -> Option<&'a [u8]> {
-    map.iter().find_map(|(k, v)| {
-        let k = match k {
-            CborValue::Integer(i) => i128::try_from(*i).ok(),
-            _ => None,
-        }?;
-        if k == key {
-            v.as_bytes().map(|bytes| bytes.as_slice())
-        } else {
-            None
+fn map_get_bytes(map: &[(CborValue, CborValue)], key: i128) -> Option<&[u8]> {
+    map.iter().find_map(|(k, v)| match (k, v) {
+        (CborValue::Integer(ki), CborValue::Bytes(b)) if i128::from(*ki) == key => {
+            Some(b.as_slice())
         }
+        _ => None,
     })
 }
 
@@ -1586,17 +1562,18 @@ async fn get_stored_credential_by_credential_id(
     }))
 }
 
-async fn upsert_credential(
-    db: &D1Database,
-    user_id: &str,
-    slot_id: i32,
-    name: &str,
-    credential_id_raw: &[u8],
-    credential_public_key_cose: &[u8],
-    sign_count: i64,
-    credential_use: &str,
-) -> Result<(), AppError> {
-    let now = Utc::now().to_rfc3339();
+async fn upsert_credential(cg: CredentialGroup<'_>) -> Result<(), AppError> {
+    let CredentialGroup {
+        db,
+        user_id,
+        slot_id,
+        name,
+        credential_id_raw,
+        credential_public_key_cose,
+        sign_count,
+        credential_use,
+    } = cg;
+    let now = crate::utils::time_now();
     let credential_id_b64url = encode_b64url(credential_id_raw);
     let public_key_cose_b64 = general_purpose::STANDARD.encode(credential_public_key_cose);
     let slot_existing: Option<String> = db
@@ -1643,9 +1620,9 @@ async fn upsert_credential(
         public_key_cose_b64.into(),
         (sign_count as f64).into(),
         f64::from(WEBAUTHN_PRF_STATUS_UNSUPPORTED).into(),
-        JsValue::NULL.into(),
-        JsValue::NULL.into(),
-        JsValue::NULL.into(),
+        JsValue::NULL,
+        JsValue::NULL,
+        JsValue::NULL,
         credential_use.into(),
         now.clone().into(),
         now.into(),
@@ -1671,8 +1648,8 @@ async fn upsert_pending_challenge(
     origin: &str,
 ) -> Result<(), AppError> {
     let now = Utc::now();
-    let expires_at = (now + Duration::seconds(CHALLENGE_TTL_SECONDS)).to_rfc3339();
-    let now = now.to_rfc3339();
+    let expires_at = (now + Duration::seconds(CHALLENGE_TTL_SECONDS)).to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+    let now = now.to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
     db.prepare(
         "INSERT INTO webauthn_challenges (
             user_id, challenge_b64url, challenge_type, rp_id, origin, expires_at, created_at, updated_at
@@ -1767,4 +1744,27 @@ fn is_expired(expires_at: &str) -> Result<bool, AppError> {
         .map_err(|_| AppError::Database)?
         .with_timezone(&Utc);
     Ok(Utc::now() >= expires)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{normalize_origin, normalize_rp_id, verify_origin};
+
+    #[test]
+    fn normalize_origin_strips_default_https_port() {
+        let normalized = normalize_origin("https://example.com:443").expect("normalized");
+        assert_eq!(normalized, "https://example.com");
+    }
+
+    #[test]
+    fn verify_origin_accepts_default_port_equivalence() {
+        assert!(verify_origin("https://example.com:443", "https://example.com").is_ok());
+        assert!(verify_origin("http://example.com:80", "http://example.com/").is_ok());
+    }
+
+    #[test]
+    fn normalize_rp_id_strips_port() {
+        assert_eq!(normalize_rp_id("example.com:443"), "example.com");
+        assert_eq!(normalize_rp_id("[::1]:8443"), "::1");
+    }
 }

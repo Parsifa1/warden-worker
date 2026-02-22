@@ -1,5 +1,4 @@
 use axum::{extract::State, Json};
-use chrono::Utc;
 use constant_time_eq::constant_time_eq;
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -110,7 +109,7 @@ pub async fn post_profile(
     }
 
     let db = db::get_db(&env)?;
-    let now = Utc::now().to_rfc3339();
+    let now = crate::utils::time_now();
 
     db.prepare("UPDATE users SET name = ?1, updated_at = ?2 WHERE id = ?3")
         .bind(&[name.into(), now.into(), claims.sub.clone().into()])?
@@ -127,7 +126,7 @@ pub async fn post_security_stamp(
     State(env): State<Arc<Env>>,
 ) -> Result<Json<Value>, AppError> {
     let db = db::get_db(&env)?;
-    let now = Utc::now().to_rfc3339();
+    let now = crate::utils::time_now();
     let security_stamp = Uuid::new_v4().to_string();
 
     db.prepare("UPDATE users SET security_stamp = ?1, updated_at = ?2 WHERE id = ?3")
@@ -232,7 +231,7 @@ pub async fn register(
             return Err(AppError::Unauthorized("Not allowed to signup".to_string()));
         }
     }
-    let now = Utc::now().to_rfc3339();
+    let now = crate::utils::time_now();
     let user = User {
         id: Uuid::new_v4().to_string(),
         name: payload.name,
@@ -307,7 +306,7 @@ pub async fn change_master_password(
         return Err(AppError::Unauthorized("Invalid credentials".to_string()));
     }
 
-    let now = Utc::now().to_rfc3339();
+    let now = crate::utils::time_now();
     let security_stamp = Uuid::new_v4().to_string();
     let master_password_hint = payload.master_password_hint.clone();
     let private_key = payload
@@ -382,7 +381,7 @@ pub async fn change_email(
         return Err(AppError::Unauthorized("Invalid credentials".to_string()));
     }
 
-    let now = Utc::now().to_rfc3339();
+    let now = crate::utils::time_now();
     let security_stamp = Uuid::new_v4().to_string();
     let kdf_type = payload.kdf.unwrap_or(user.kdf_type);
     let kdf_iterations = payload.kdf_iterations.unwrap_or(user.kdf_iterations);
@@ -439,7 +438,7 @@ pub async fn update_avatar(
     }
 
     let db = db::get_db(&env)?;
-    let now = Utc::now().to_rfc3339();
+    let now = crate::utils::time_now();
 
     db.prepare("UPDATE users SET avatar_color = ?1, updated_at = ?2 WHERE id = ?3")
         .bind(&[

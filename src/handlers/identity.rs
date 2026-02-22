@@ -60,6 +60,8 @@ pub struct TokenRequest {
     #[serde(rename = "twoFactorRemember")]
     #[serde(default, deserialize_with = "deserialize_trimmed_i32_opt")]
     two_factor_remember: Option<i32>,
+    #[serde(rename = "authRequest")]
+    auth_request: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -346,6 +348,111 @@ pub async fn token(
                 .map_err(|_| AppError::Unauthorized("Invalid credentials".to_string()))?
                 .ok_or_else(|| AppError::Unauthorized("Invalid credentials".to_string()))?;
             let user: User = serde_json::from_value(user).map_err(|_| AppError::Internal)?;
+            // If this is an auth-request login (trusted device), skip master password check
+            // and verify the auth-request access code instead.
+            if let Some(auth_request_id) = payload.auth_request.as_deref() {
+                use crate::handlers::devices as dev;
+                dev::ensure_auth_requests_table(&db).await?;
+                dev::purge_expired_auth_requests(&db).await?;
+
+                let ar_row: Option<Value> = db
+                    .prepare("SELECT * FROM auth_requests WHERE id = ?1 AND user_id = ?2 LIMIT 1")
+                    .bind(&[auth_request_id.into(), user.id.clone().into()])?
+                    .first(None)
+                    .await
+                    .map_err(|_| AppError::Database)?;
+                let ar_row = ar_row
+                    .ok_or_else(|| AppError::Unauthorized("Invalid credentials".to_string()))?;
+
+                // Must be approved
+                let approved = ar_row
+                    .get("approved")
+                    .and_then(|v| {
+                        if v.is_null() {
+                            None
+                        } else if let Some(b) = v.as_bool() {
+                            Some(b)
+                        } else {
+                            v.as_i64().map(|i| i != 0)
+                        }
+                    })
+                    .unwrap_or(false);
+                if !approved {
+                    return Err(AppError::Unauthorized("Invalid credentials".to_string()));
+                }
+
+                // Verify access code (password field holds the accessCode)
+                let stored_hash = ar_row
+                    .get("access_code_hash")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or_default();
+                let candidate_hash = sha256_hex(&password_hash);
+                if !constant_time_eq(stored_hash.as_bytes(), candidate_hash.as_bytes()) {
+                    return Err(AppError::Unauthorized("Invalid credentials".to_string()));
+                }
+
+                // Auth-request login bypasses 2FA and remember-device flow
+                let user_id = user.id.clone();
+                let device_identifier = payload.device_identifier.clone();
+                let device_name = payload.device_name.clone();
+                let device_type = payload.device_type;
+
+                let response = generate_tokens_and_response(user, &env, None)?;
+
+                if let Some(device_identifier) = device_identifier.as_deref() {
+                    ensure_devices_table(&db).await?;
+                    let now = crate::utils::time_now();
+                    if let Ok(stmt) = db
+                        .prepare(
+                            "INSERT INTO devices (id, user_id, device_identifier, device_name, device_type, remember_token_hash, created_at, updated_at)
+                             VALUES (?1, ?2, ?3, ?4, ?5, NULL, ?6, ?7)
+                             ON CONFLICT(user_id, device_identifier) DO UPDATE SET
+                               updated_at = excluded.updated_at,
+                               device_name = excluded.device_name,
+                               device_type = excluded.device_type",
+                        )
+                        .bind(&[
+                            Uuid::new_v4().to_string().into(),
+                            user_id.clone().into(),
+                            device_identifier.into(),
+                            device_name.clone().into(),
+                            device_type.map(f64::from).into(),
+                            now.clone().into(),
+                            now.into(),
+                        ])
+                    {
+                        let _ = stmt.run().await;
+                    }
+                }
+
+                let access_token_to_set = response
+                    .get("access_token")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string());
+                let refresh_token_to_set = response
+                    .get("refresh_token")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string());
+
+                let mut resp = Json(response).into_response();
+                if let Some(v) = access_token_to_set.as_deref() {
+                    set_cookie(
+                        resp.headers_mut(),
+                        "bw_access_token",
+                        v,
+                        Duration::hours(2).num_seconds(),
+                    )?;
+                }
+                if let Some(v) = refresh_token_to_set.as_deref() {
+                    set_cookie(
+                        resp.headers_mut(),
+                        "bw_refresh_token",
+                        v,
+                        Duration::days(30).num_seconds(),
+                    )?;
+                }
+                return Ok(resp);
+            }
             // Securely compare the provided hash with the stored hash
             if !constant_time_eq(
                 user.master_password_hash.as_bytes(),
@@ -449,7 +556,7 @@ pub async fn token(
             if let Some(device_identifier) = device_identifier.as_deref() {
                 ensure_devices_table(&db).await?;
 
-                let now = Utc::now().to_rfc3339();
+                let now = crate::utils::time_now();
                 let remember_hash = remember_token_to_return.as_deref().map(sha256_hex);
 
                 if let Ok(stmt) = db
@@ -571,7 +678,7 @@ pub async fn token(
             if let Some(device_identifier) = device_identifier.as_deref() {
                 ensure_devices_table(&db).await?;
 
-                let now = Utc::now().to_rfc3339();
+                let now = crate::utils::time_now();
                 if let Ok(stmt) = db
                     .prepare(
                         "INSERT INTO devices (id, user_id, device_identifier, device_name, device_type, remember_token_hash, created_at, updated_at)
@@ -590,7 +697,7 @@ pub async fn token(
                         device_type.map(f64::from).into(),
                         Option::<String>::None.into(),
                         now.clone().into(),
-                        now.into(),
+                        now.clone().into(),
                     ])
                 {
                     let _ = stmt.run().await;

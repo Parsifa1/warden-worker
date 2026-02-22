@@ -1,5 +1,4 @@
 use axum::{extract::State, Json};
-use chrono::Utc;
 use constant_time_eq::constant_time_eq;
 use serde::Deserialize;
 use serde_json::json;
@@ -131,7 +130,7 @@ pub async fn authenticator_request(
     State(env): State<Arc<Env>>,
 ) -> Result<Json<serde_json::Value>, AppError> {
     let db = db::get_db(&env)?;
-    let now = Utc::now().to_rfc3339();
+    let now = crate::utils::time_now();
 
     let user_email: Option<String> = db
         .prepare("SELECT email FROM users WHERE id = ?1")
@@ -239,7 +238,7 @@ pub async fn activate_authenticator(
         return Err(AppError::BadRequest("Invalid TOTP code".to_string()));
     }
 
-    let now = Utc::now().to_rfc3339();
+    let now = crate::utils::time_now();
     let two_factor_key_b64 = env.secret("TWO_FACTOR_ENC_KEY").ok().map(|s| s.to_string());
     let secret_enc = two_factor::encrypt_secret_with_optional_key(
         two_factor_key_b64.as_deref(),
@@ -325,7 +324,7 @@ pub async fn authenticator_enable(
     Json(payload): Json<EnableAuthenticatorRequest>,
 ) -> Result<Json<serde_json::Value>, AppError> {
     let db = db::get_db(&env)?;
-    let now = Utc::now().to_rfc3339();
+    let now = crate::utils::time_now();
 
     let secret_enc = two_factor::get_authenticator_secret_enc(&db, &claims.sub)
         .await?
