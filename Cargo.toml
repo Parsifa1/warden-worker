@@ -25,11 +25,23 @@ worker-macros = { version = "0.6", features = ['http'] }
 wasm-bindgen = "0.2.106"
 js-sys = "0.3"
 wasm-bindgen-futures = "0.4"
-web-sys = { version = "0.3", features = ["Crypto", "CryptoKey", "SubtleCrypto", "WorkerGlobalScope", "Pbkdf2Params"] }
+web-sys = { version = "0.3", features = [
+    "Crypto",
+    "CryptoKey",
+    "SubtleCrypto",
+    "WorkerGlobalScope",
+    "Pbkdf2Params",
+] }
 console_error_panic_hook = "0.1.7"
 
 # Axum and Routing
-axum = { version = "0.8", default-features = false, features=["json", "macros", "form", "multipart", "query"] }
+axum = { version = "0.8", default-features = false, features = [
+    "json",
+    "macros",
+    "form",
+    "multipart",
+    "query",
+] }
 tower-service = "0.3"
 tower-http = { version = "0.5", features = ["cors"] }
 
@@ -45,7 +57,11 @@ getrandom = { version = "0.3", features = ["wasm_js"] }
 getrandom_02 = { package = "getrandom", version = "0.2", features = ["js"] }
 constant_time_eq = "0.3"
 aes-gcm = "0.10"
-totp-rs = { version = "5.7.0", default-features = false, features = ["otpauth", "gen_secret", "qr"] }
+totp-rs = { version = "5.7.0", default-features = false, features = [
+    "otpauth",
+    "gen_secret",
+    "qr",
+] }
 sha2 = "0.10"
 hmac = "0.12"
 p256 = { version = "0.13", features = ["ecdsa"] }
@@ -58,3 +74,4 @@ log = "0.4"
 thiserror = "1.0"
 once_cell = "1.19"
 console_log = "1.0.0"
+phf = { version = "0.13.1", features = ["macros"] }

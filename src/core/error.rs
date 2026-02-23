@@ -4,6 +4,13 @@ use axum::Json;
 use serde_json::json;
 use thiserror::Error;
 
+static ERROR_LIST: phf::Map<&'static str, ErrorListEntry> = phf::phf_map! {
+    "invalid_username_or_password" => ErrorListEntry {
+        error: "invalid_grant",
+        message: "邮箱或密码错误，请重新输入",
+    },
+};
+
 #[derive(Error, Debug)]
 pub enum AppError {
     #[error("Worker error: {0}")]
@@ -27,11 +34,27 @@ pub enum AppError {
 
     #[error("Internal server error")]
     Internal,
+
+    #[error("Too many requests: {0}")]
+    TooManyRequests(String),
+}
+
+#[derive(serde::Serialize)]
+struct ErrorModel {
+    #[serde(rename = "Message")]
+    message: String,
+    #[serde(rename = "Object")]
+    object: String,
+}
+
+struct ErrorListEntry<'a> {
+    error: &'a str,
+    message: &'a str,
 }
 
 impl IntoResponse for AppError {
     fn into_response(self) -> Response {
-        let (status, error_message) = match self {
+        let (status, error_description) = match self {
             AppError::Worker(e) => {
                 log::error!("Worker error: {}", e);
                 (
@@ -46,6 +69,7 @@ impl IntoResponse for AppError {
             AppError::NotFound(msg) => (StatusCode::NOT_FOUND, msg),
             AppError::BadRequest(msg) => (StatusCode::BAD_REQUEST, msg),
             AppError::Unauthorized(msg) => (StatusCode::UNAUTHORIZED, msg),
+            AppError::TooManyRequests(msg) => (StatusCode::TOO_MANY_REQUESTS, msg),
             AppError::Crypto(msg) => {
                 log::error!("Crypto error: {}", msg);
                 (
@@ -59,7 +83,14 @@ impl IntoResponse for AppError {
             ),
         };
 
-        let body = Json(json!({ "error": error_message }));
+        let body = Json(json!({
+            "error": ERROR_LIST[&error_description].error,
+            "error_description": error_description,
+            "ErrorModel": ErrorModel {
+                message: ERROR_LIST[&error_description].message.to_string(),
+                object: "error".to_string(),
+            }
+        }));
         (status, body).into_response()
     }
 }
