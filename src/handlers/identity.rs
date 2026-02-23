@@ -4,7 +4,8 @@ use axum::{extract::State, response::IntoResponse, Form, Json};
 use base64::{engine::general_purpose, Engine as _};
 use chrono::{Duration, Utc};
 use constant_time_eq::constant_time_eq;
-use rand::RngCore;
+use rand::rngs::SysRng;
+use rand::TryRng;
 use serde::de::{self, Deserializer};
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -200,7 +201,7 @@ fn sha256_hex(input: &str) -> String {
 
 fn generate_remember_token() -> String {
     let mut bytes = [0u8; 32];
-    rand::rngs::OsRng.fill_bytes(&mut bytes);
+    SysRng.try_fill_bytes(&mut bytes).expect("failed to generate random bytes");
     general_purpose::URL_SAFE_NO_PAD.encode(bytes)
 }
 
@@ -470,7 +471,9 @@ pub async fn token(
                 user.master_password_hash.as_bytes(),
                 password_hash.as_bytes(),
             ) {
-                return Err(AppError::Unauthorized("invalid_username_or_password".to_string()));
+                return Err(AppError::Unauthorized(
+                    "invalid_username_or_password".to_string(),
+                ));
             }
 
             let authenticator_enabled = two_factor::is_authenticator_enabled(&db, &user.id).await?;

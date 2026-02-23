@@ -1,6 +1,6 @@
 use base64::{engine::general_purpose, Engine as _};
 use constant_time_eq::constant_time_eq;
-use hmac::{Hmac, Mac};
+use hmac::{Hmac, KeyInit, Mac};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use serde_json::Value;
