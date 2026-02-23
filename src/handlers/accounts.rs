@@ -1,4 +1,4 @@
-use axum::{extract::State, Json};
+use axum::{extract::State, http::HeaderMap, Json};
 use constant_time_eq::constant_time_eq;
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -172,11 +172,29 @@ pub async fn revision_date(_claims: Claims) -> Result<Json<i64>, AppError> {
 #[worker::send]
 pub async fn prelogin(
     State(env): State<Arc<Env>>,
+    headers: HeaderMap,
     Json(payload): Json<serde_json::Value>,
 ) -> Result<Json<PreloginResponse>, AppError> {
     let email = payload["email"]
         .as_str()
         .ok_or_else(|| AppError::BadRequest("Missing email".to_string()))?;
+
+    // Check rate limit using IP address as key to prevent email enumeration attacks
+    if let Ok(rate_limiter) = env.rate_limiter("LOGIN_RATE_LIMITER") {
+        let ip = headers
+            .get("cf-connecting-ip")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("unknown");
+        let rate_limit_key = format!("prelogin:{}", ip);
+        if let Ok(outcome) = rate_limiter.limit(rate_limit_key).await {
+            if !outcome.success {
+                return Err(AppError::TooManyRequests(
+                    "Too many requests. Please try again later.".to_string(),
+                ));
+            }
+        }
+    }
+
     let db = db::get_db(&env)?;
 
     let stmt = db.prepare("SELECT kdf_type, kdf_iterations FROM users WHERE email = ?1");
@@ -206,8 +224,24 @@ pub async fn prelogin(
 #[worker::send]
 pub async fn register(
     State(env): State<Arc<Env>>,
+    headers: HeaderMap,
     Json(payload): Json<RegisterRequest>,
 ) -> Result<Json<Value>, AppError> {
+    // Check rate limit using IP address as key to prevent mass registration and email enumeration
+    if let Ok(rate_limiter) = env.rate_limiter("LOGIN_RATE_LIMITER") {
+        let ip = headers
+            .get("cf-connecting-ip")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("unknown");
+        let rate_limit_key = format!("register:{}", ip);
+        if let Ok(outcome) = rate_limiter.limit(rate_limit_key).await {
+            if !outcome.success {
+                return Err(AppError::TooManyRequests(
+                    "Too many requests. Please try again later.".to_string(),
+                ));
+            }
+        }
+    }
     let db = db::get_db(&env)?;
     let normalized_email = payload.email.trim().to_lowercase();
     let user_count: Option<i64> = db

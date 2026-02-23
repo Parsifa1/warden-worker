@@ -990,6 +990,7 @@ pub async fn verify_passwordless_login_assertion(
             AppError::Worker(e) => format!("worker error: {e}"),
             AppError::Crypto(msg) => msg,
             AppError::Internal => "internal server error".to_string(),
+            AppError::TooManyRequests(msg) => msg,
         }
     }
 

@@ -340,6 +340,18 @@ pub async fn token(
                 .password
                 .ok_or_else(|| AppError::BadRequest("Missing password".to_string()))?;
 
+            // Check rate limit using email as key to prevent brute force attacks
+            // This limits login attempts per email address, not per IP
+            if let Ok(rate_limiter) = env.rate_limiter("LOGIN_RATE_LIMITER") {
+                let rate_limit_key = format!("login:{}", username.to_lowercase());
+                if let Ok(outcome) = rate_limiter.limit(rate_limit_key).await {
+                    if !outcome.success {
+                        return Err(AppError::TooManyRequests(
+                            "Too many login attempts. Please try again later.".to_string(),
+                        ));
+                    }
+                }
+            }
             let user: Value = db
                 .prepare("SELECT * FROM users WHERE email = ?1")
                 .bind(&[username.to_lowercase().into()])?
@@ -458,7 +470,7 @@ pub async fn token(
                 user.master_password_hash.as_bytes(),
                 password_hash.as_bytes(),
             ) {
-                return Err(AppError::Unauthorized("Invalid credentials".to_string()));
+                return Err(AppError::Unauthorized("invalid_username_or_password".to_string()));
             }
 
             let authenticator_enabled = two_factor::is_authenticator_enabled(&db, &user.id).await?;
