@@ -7,7 +7,8 @@ use axum::{
 use base64::{engine::general_purpose, Engine as _};
 use chrono::{DateTime, Utc};
 use constant_time_eq::constant_time_eq;
-use rand::RngCore;
+use getrandom::SysRng;
+use rand::TryRng;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
@@ -67,7 +68,7 @@ fn hash_password(password: &str, salt_b64: &str) -> Result<String, AppError> {
 
 fn new_salt_b64() -> String {
     let mut bytes = [0u8; 16];
-    rand::rngs::OsRng.fill_bytes(&mut bytes);
+    SysRng.try_fill_bytes(&mut bytes).expect("Failed to generate salt");
     general_purpose::STANDARD.encode(bytes)
 }
 

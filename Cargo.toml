@@ -2,7 +2,7 @@
 name = "warden-worker"
 version = "0.1.0"
 edition = "2021"
-authors = ["deepubuntu"]
+# authors = ["deepubuntu"]
 
 [package.metadata.release]
 release = false
@@ -14,64 +14,68 @@ wasm-opt = false
 [lib]
 crate-type = ["cdylib"]
 
-[profile.release]
-lto = true
-codegen-units = 1
-
 [dependencies]
-# Worker & Web APIs
-worker = { version = "0.7.0", features = ["axum", "http", "d1"] }
-worker-macros = { version = "0.6", features = ['http'] }
-wasm-bindgen = "0.2.106"
-js-sys = "0.3"
-wasm-bindgen-futures = "0.4"
-web-sys = { version = "0.3", features = [
-    "Crypto",
-    "CryptoKey",
-    "SubtleCrypto",
-    "WorkerGlobalScope",
-    "Pbkdf2Params",
-] }
-console_error_panic_hook = "0.1.7"
-
+aes-gcm = "0.11.0-rc.3"
 # Axum and Routing
 axum = { version = "0.8", default-features = false, features = [
-    "json",
-    "macros",
-    "form",
-    "multipart",
-    "query",
+  "form",
+  "json",
+  "macros",
+  "multipart",
+  "query",
 ] }
-tower-service = "0.3"
-tower-http = { version = "0.5", features = ["cors"] }
-
+# Crypto & Encoding
+base64 = "0.22"
+# Utilities
+chrono = { version = "0.4", features = ["serde"] }
+ciborium = "0.2"
+console_error_panic_hook = "0.1.7"
+console_log = "1.0.0"
+constant_time_eq = "0.4"
+generic-array = { version = "1", features = ["compat-0_14"] }
+getrandom = { version = "0.4", features = ["wasm_js"] }
+# getrandom_02 = { package = "getrandom", version = "0.2", features = ["js"] }
+# getrandom_03 = { package = "getrandom", version = "0.3", features = ["wasm_js"] }
+hex = "0.4"
+hmac = "0.13.0-rc.5"
+js-sys = "0.3"
+log = "0.4"
+once_cell = "1.21"
+p256 = { version = "0.13.2", features = ["ecdsa"] }
+phf = { version = "0.13.1", features = ["macros"] }
+rand = { version = "0.10" }
 # Data & Serialization
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-
-# Crypto & Encoding
-base64 = "0.21"
-hex = "0.4"
-rand = { version = "0.8" }
-getrandom = { version = "0.3", features = ["wasm_js"] }
-getrandom_02 = { package = "getrandom", version = "0.2", features = ["js"] }
-constant_time_eq = "0.3"
-aes-gcm = "0.10"
+sha2 = "0.11.0-rc.5"
+thiserror = "2.0"
 totp-rs = { version = "5.7.0", default-features = false, features = [
-    "otpauth",
-    "gen_secret",
-    "qr",
+  "gen_secret",
+  "otpauth",
+  "qr",
 ] }
-sha2 = "0.10"
-hmac = "0.12"
-p256 = { version = "0.13", features = ["ecdsa"] }
-ciborium = "0.2"
+tower-http = { version = "0.6", features = ["cors"] }
+tower-service = "0.3"
+uuid = { version = "1.21", features = ["rng-rand", "serde", "v4"] }
+wasm-bindgen = "0.2.111"
+wasm-bindgen-futures = "0.4"
+web-sys = { version = "0.3", features = [
+  "Crypto",
+  "CryptoKey",
+  "Pbkdf2Params",
+  "SubtleCrypto",
+  "WorkerGlobalScope",
+] }
+# Worker & Web APIs
+worker = { version = "0.7.4", features = ["axum", "d1", "http"] }
+worker-macros = { version = "0.7", features = ["http"] }
 
-# Utilities
-chrono = { version = "0.4", features = ["serde"] }
-uuid = { version = "1.6", features = ["v4", "serde", "rng-rand"] }
-log = "0.4"
-thiserror = "1.0"
-once_cell = "1.19"
-console_log = "1.0.0"
-phf = { version = "0.13.1", features = ["macros"] }
+[target.wasm32-unknown-unknown.dependencies]
+getrandom_v2 = { package = "getrandom", version = "0.2", features = ["js"] }
+getrandom_v3 = { package = "getrandom", version = "0.3", features = ["wasm_js"] }
+
+[patch.crates-io]
+
+[profile.release]
+lto = true
+codegen-units = 1

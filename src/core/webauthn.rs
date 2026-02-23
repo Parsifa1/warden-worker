@@ -2,8 +2,9 @@ use axum::http::HeaderMap;
 use base64::{engine::general_purpose, Engine as _};
 use chrono::{Duration, Utc};
 use ciborium::value::Value as CborValue;
+use getrandom::SysRng;
 use p256::ecdsa::{signature::Verifier, Signature, VerifyingKey};
-use rand::RngCore;
+use rand::TryRng;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
@@ -1119,7 +1120,7 @@ pub fn extract_assertion_credential_id_b64url(
 
 fn random_challenge_b64url() -> String {
     let mut challenge = [0u8; 32];
-    rand::rngs::OsRng.fill_bytes(&mut challenge);
+    SysRng.try_fill_bytes(&mut challenge).expect("failed to generate random bytes");
     encode_b64url(&challenge)
 }
 
