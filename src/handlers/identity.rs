@@ -201,7 +201,9 @@ fn sha256_hex(input: &str) -> String {
 
 fn generate_remember_token() -> String {
     let mut bytes = [0u8; 32];
-    SysRng.try_fill_bytes(&mut bytes).expect("failed to generate random bytes");
+    SysRng
+        .try_fill_bytes(&mut bytes)
+        .expect("failed to generate random bytes");
     general_purpose::URL_SAFE_NO_PAD.encode(bytes)
 }
 

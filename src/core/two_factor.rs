@@ -14,7 +14,9 @@ pub const TWO_FACTOR_PROVIDER_AUTHENTICATOR: i32 = 0;
 
 pub fn generate_totp_secret_base32_20() -> String {
     let mut bytes = [0u8; 20];
-    SysRng.try_fill_bytes(&mut bytes).expect("failed to generate random bytes");
+    SysRng
+        .try_fill_bytes(&mut bytes)
+        .expect("failed to generate random bytes");
     Secret::Raw(bytes.to_vec()).to_encoded().to_string()
 }
 

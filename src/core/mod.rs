@@ -6,3 +6,4 @@ pub mod jwt;
 pub mod notifications;
 pub mod two_factor;
 pub mod webauthn;
+pub mod heavy_do;
