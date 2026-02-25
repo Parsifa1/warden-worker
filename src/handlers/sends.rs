@@ -68,7 +68,9 @@ fn hash_password(password: &str, salt_b64: &str) -> Result<String, AppError> {
 
 fn new_salt_b64() -> String {
     let mut bytes = [0u8; 16];
-    SysRng.try_fill_bytes(&mut bytes).expect("Failed to generate salt");
+    SysRng
+        .try_fill_bytes(&mut bytes)
+        .expect("Failed to generate salt");
     general_purpose::STANDARD.encode(bytes)
 }
 

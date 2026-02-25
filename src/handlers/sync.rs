@@ -115,8 +115,10 @@ pub async fn get_sync_data(
     };
 
     let keys = crate::webauthn::list_webauthn_api_items(&db, &user_id).await?;
-    let web_authn_prf_options = keys.into_iter().map(|k| {
-        json!({
+    let web_authn_prf_options = keys
+        .into_iter()
+        .map(|k| {
+            json!({
             "1":{
                 "encryptedPrivateKey": k.encrypted_private_key,
                 "encryptedUserKey": k.encrypted_user_key,
@@ -125,7 +127,8 @@ pub async fn get_sync_data(
                 "transports": [],
                 }
             })
-    }).collect::<Vec<_>>();
+        })
+        .collect::<Vec<_>>();
     let response = json!({
         "profile": profile,
         "folders": folders,

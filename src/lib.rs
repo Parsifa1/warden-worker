@@ -9,7 +9,9 @@ mod models;
 mod router;
 mod utils;
 
-pub use core::{auth, crypto, db, error, jwt, notifications, two_factor, webauthn};
+pub use core::{auth, crypto, db, error, heavy_do, jwt, notifications, two_factor, webauthn};
+pub use heavy_do::HeavyDo;
+
 
 #[event(fetch)]
 pub async fn main(

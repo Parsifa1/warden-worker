@@ -1120,7 +1120,9 @@ pub fn extract_assertion_credential_id_b64url(
 
 fn random_challenge_b64url() -> String {
     let mut challenge = [0u8; 32];
-    SysRng.try_fill_bytes(&mut challenge).expect("failed to generate random bytes");
+    SysRng
+        .try_fill_bytes(&mut challenge)
+        .expect("failed to generate random bytes");
     encode_b64url(&challenge)
 }
 
