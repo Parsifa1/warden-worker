@@ -28,7 +28,7 @@
     },
     {
       "tag": "v2-heavy-do",
-      "new_sqlite_classes": ["HeavyDo"]
+      "new_classes": ["HeavyDo"]
     }
   ],
   "ratelimits": [{

@@ -19,31 +19,33 @@ use worker::{durable_object, DurableObject, Env, HttpRequest, Request, Response,
 pub struct HeavyDo {
     #[allow(dead_code)]
     state: State,
+    #[allow(dead_code)]
     env: Env,
+    router: axum::Router,
 }
 
 
 impl DurableObject for HeavyDo {
     fn new(state: State, env: Env) -> Self {
-        Self { state, env }
-    }
-
-    async fn fetch(&self, req: Request) -> Result<Response> {
         console_error_panic_hook::set_once();
         let _ = console_log::init_with_level(log::Level::Debug);
-
+        
         let cors = CorsLayer::new()
             .allow_methods(Any)
             .allow_headers(Any)
             .allow_origin(Any);
+        let router = crate::router::api_router(env.clone()).layer(cors);
+        
+        Self { state, env, router }
+    }
 
+    async fn fetch(&self, req: Request) -> Result<Response> {
         let http_req = HttpRequest::try_from(req)?;
-        let mut app = crate::router::api_router(self.env.clone()).layer(cors);
+        let mut app = self.router.clone();
         let http_resp = app
             .call(http_req)
             .await
             .map_err(|e| worker::Error::RustError(e.to_string()))?;
-
         Response::try_from(http_resp)
     }
 }
