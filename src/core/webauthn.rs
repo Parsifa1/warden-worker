@@ -48,6 +48,7 @@ pub struct WebAuthnCredentialApiItem {
     pub encrypted_public_key: Option<String>,
     pub encrypted_user_key: Option<String>,
     pub encrypted_private_key: Option<String>,
+    pub credential_id_b64url: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -436,7 +437,7 @@ pub async fn list_webauthn_api_items(
     ensure_webauthn_tables(db).await?;
     let rows: Vec<Value> = db
         .prepare(
-            "SELECT slot_id, name, prf_status, encrypted_public_key, encrypted_user_key, encrypted_private_key
+            "SELECT slot_id, name, prf_status, encrypted_public_key, encrypted_user_key, encrypted_private_key, credential_id_b64url
              FROM two_factor_webauthn
              WHERE user_id = ?1 AND credential_use IN ('login', 'both')
              ORDER BY slot_id ASC",
@@ -487,6 +488,11 @@ pub async fn list_webauthn_api_items(
             WEBAUTHN_PRF_STATUS_UNSUPPORTED
         };
 
+        let credential_id_b64url = row
+            .get("credential_id_b64url")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .to_string();
         out.push(WebAuthnCredentialApiItem {
             id,
             name,
@@ -494,6 +500,7 @@ pub async fn list_webauthn_api_items(
             encrypted_public_key,
             encrypted_user_key,
             encrypted_private_key,
+            credential_id_b64url,
         });
     }
 
