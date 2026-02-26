@@ -119,13 +119,10 @@ pub async fn get_sync_data(
         .into_iter()
         .map(|k| {
             json!({
-            "1":{
+                "credentialId": k.credential_id_b64url,
+                "transports": [],
                 "encryptedPrivateKey": k.encrypted_private_key,
                 "encryptedUserKey": k.encrypted_user_key,
-                // "credentialId": k.credential_id,
-                "credentialId": [],
-                "transports": [],
-                }
             })
         })
         .collect::<Vec<_>>();
