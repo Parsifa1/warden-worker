@@ -84,10 +84,10 @@ impl IntoResponse for AppError {
         };
 
         let body = Json(json!({
-            "error": ERROR_LIST[&error_description].error,
+            "error": ERROR_LIST.get(error_description.as_str()).map(|e| e.error).unwrap_or("server_error"),
             "error_description": error_description,
             "ErrorModel": ErrorModel {
-                message: ERROR_LIST[&error_description].message.to_string(),
+                message: ERROR_LIST.get(error_description.as_str()).map(|e| e.message).unwrap_or(&error_description).to_string(),
                 object: "error".to_string(),
             }
         }));
