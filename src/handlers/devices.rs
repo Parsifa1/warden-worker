@@ -92,14 +92,17 @@ pub(crate) async fn ensure_device_management_tables(
 }
 
 pub(crate) async fn purge_expired_auth_requests(db: &worker::D1Database) -> Result<(), AppError> {
-    let cutoff =
-        (Utc::now() - Duration::minutes(15)).to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+    let cutoff = auth_requests_cutoff();
     db.prepare("DELETE FROM auth_requests WHERE creation_date < ?1")
         .bind(&[cutoff.into()])?
         .run()
         .await
         .map_err(|_| AppError::Database)?;
     Ok(())
+}
+
+fn auth_requests_cutoff() -> String {
+    (Utc::now() - Duration::minutes(15)).to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
 }
 
 pub(crate) fn client_device_type_from_headers(headers: &HeaderMap) -> i32 {
@@ -609,11 +612,16 @@ pub async fn get_auth_request(
 ) -> Result<Json<Value>, AppError> {
     let db = db::get_db(&env)?;
     ensure_auth_requests_table(&db).await?;
-    purge_expired_auth_requests(&db).await?;
+    let cutoff = auth_requests_cutoff();
 
     let row: Option<Value> = db
-        .prepare("SELECT * FROM auth_requests WHERE id = ?1 AND user_id = ?2 LIMIT 1")
-        .bind(&[auth_request_id.into(), claims.sub.into()])?
+        .prepare(
+            "SELECT *
+             FROM auth_requests
+             WHERE id = ?1 AND user_id = ?2 AND creation_date >= ?3
+             LIMIT 1",
+        )
+        .bind(&[auth_request_id.into(), claims.sub.into(), cutoff.into()])?
         .first(None)
         .await
         .map_err(|_| AppError::Database)?;
@@ -776,11 +784,16 @@ pub async fn get_auth_request_response(
 ) -> Result<Json<Value>, AppError> {
     let db = db::get_db(&env)?;
     ensure_auth_requests_table(&db).await?;
-    purge_expired_auth_requests(&db).await?;
+    let cutoff = auth_requests_cutoff();
 
     let row: Option<Value> = db
-        .prepare("SELECT * FROM auth_requests WHERE id = ?1 LIMIT 1")
-        .bind(&[auth_request_id.into()])?
+        .prepare(
+            "SELECT *
+             FROM auth_requests
+             WHERE id = ?1 AND creation_date >= ?2
+             LIMIT 1",
+        )
+        .bind(&[auth_request_id.into(), cutoff.into()])?
         .first(None)
         .await
         .map_err(|_| AppError::Database)?;
@@ -841,16 +854,27 @@ pub async fn get_auth_requests_pending(
 ) -> Result<Json<Value>, AppError> {
     let db = db::get_db(&env)?;
     ensure_auth_requests_table(&db).await?;
-    purge_expired_auth_requests(&db).await?;
+    let cutoff = auth_requests_cutoff();
 
     let rows: Vec<Value> = db
         .prepare(
-            "SELECT *
+            "SELECT id,
+                    public_key,
+                    device_type,
+                    request_device_identifier,
+                    response_device_identifier,
+                    request_ip,
+                    enc_key,
+                    master_password_hash,
+                    creation_date,
+                    response_date,
+                    approved
              FROM auth_requests
-             WHERE user_id = ?1 AND approved IS NULL
-             ORDER BY creation_date DESC",
+             WHERE user_id = ?1 AND approved IS NULL AND creation_date >= ?2
+             ORDER BY creation_date DESC
+             LIMIT 50",
         )
-        .bind(&[claims.sub.into()])?
+        .bind(&[claims.sub.into(), cutoff.into()])?
         .all()
         .await
         .map_err(|_| AppError::Database)?
