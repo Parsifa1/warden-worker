@@ -1,459 +1,212 @@
-# AGENTS.md - Warden Worker 开发指南
+# AGENTS.md（Warden Worker 代理开发手册）
 
-本文档为 AI 代码助手提供 Warden Worker 项目的开发规范和约定。
+本文件面向在本仓库工作的自动化编码代理（Agent）。
+目标：快速理解项目、稳定实现需求、可复现验证结果。
 
-## 项目概述
+## 1) 项目速览
 
-Warden Worker 是运行在 Cloudflare Workers 上的 Bitwarden 兼容服务端，使用 Rust 编写，Cloudflare D1（SQLite）作为数据存储。
+- 项目：`warden-worker`
+- 语言：Rust 2021 + 少量 JavaScript 路由分流
+- 运行：Cloudflare Workers（WASM）+ Durable Objects
+- 数据：Cloudflare D1（SQLite）
+- 入口：`src/entry.js`（分流）+ `src/lib.rs`（Rust fetch/scheduled）
 
-**技术栈**：
-- 语言：Rust (edition 2021)
-- 运行时：Cloudflare Workers (wasm32-unknown-unknown)
-- 框架：Axum + worker crate
-- 数据库：Cloudflare D1 (SQLite)
-- 构建工具：worker-build
-- 部署工具：wrangler
+## 2) 关键目录与职责
 
-**项目结构**：
-```
-src/
-├── core/           # 核心功能模块
-│   ├── auth.rs         # JWT Claims 提取器（Axum FromRequestParts）
-│   ├── crypto.rs       # 密码哈希、加解密工具
-│   ├── db.rs           # D1 数据库连接辅助
-│   ├── error.rs        # AppError 统一错误类型
-│   ├── jwt.rs          # JWT 签发与验证
-│   ├── notifications.rs # Durable Objects 通知系统
-│   ├── two_factor.rs   # TOTP 验证逻辑
-│   └── webauthn.rs     # WebAuthn 注册与断言逻辑
-├── handlers/       # API 处理器
-│   ├── accounts.rs     # 账号注册、Profile、改密、改邮箱、头像
-│   ├── ciphers.rs      # 密码项 CRUD、软删除、恢复
-│   ├── config.rs       # /api/config、alive、version 等
-│   ├── devices.rs      # 设备管理、Auth Request 流程
-│   ├── folders.rs      # 文件夹 CRUD
-│   ├── icons.rs        # 网站图标代理
-│   ├── identity.rs     # 登录令牌、WebAuthn 无密码登录
-│   ├── import.rs       # 密码库导入
-│   ├── sends.rs        # Send（文本/文件）CRUD
-│   ├── sync.rs         # /api/sync 全量同步
-│   ├── two_factor.rs   # TOTP 2FA 管理
-│   ├── usage.rs        # D1 用量查询
-│   └── webauthn.rs     # WebAuthn / 通行密钥管理
-├── models/         # 数据模型
-│   ├── cipher.rs       # Cipher 密码项模型
-│   ├── folder.rs       # 文件夹模型
-│   ├── import.rs       # 导入数据模型
-│   ├── send.rs         # Send 模型
-│   ├── sync.rs         # 同步响应模型
-│   └── user.rs         # 用户模型
-├── static/         # 静态资源（demo.html、web-vault）
-├── router.rs       # Axum 路由定义
-└── lib.rs          # 入口点
-```
+- `src/core/`：认证、加密、JWT、通知、2FA、WebAuthn、错误
+- `src/handlers/`：HTTP handler（Axum 风格）
+- `src/models/`：请求/响应与数据库模型
+- `src/router.rs`：路由集中定义
+- `wrangler.jsonc`：部署、绑定、observability、构建命令
 
----
+## 3) 必读文件（改动前）
 
-## 构建和测试命令
+1. `wrangler.jsonc`
+2. `Cargo.toml`
+3. `src/entry.js`
+4. `src/router.rs`
+5. `src/core/error.rs`
+6. 对应业务的 handler/core 文件
 
-### 本地开发
+## 4) 构建与检查命令
 
 ```bash
-# 初始化本地数据库
-wrangler d1 execute vault1 --local --file=sql/schema_full.sql
-
-# 启动本地开发服务器
 wrangler dev
-
-# 使用 .dev.vars 文件注入环境变量（本地开发）
-# 创建 .dev.vars 文件并添加：
-# JWT_SECRET=your_secret
-# JWT_REFRESH_SECRET=your_refresh_secret
-# ALLOWED_EMAILS=test@example.com
-# TWO_FACTOR_ENC_KEY=base64_encoded_32_bytes
-```
-
-### 构建
-
-```bash
-# 开发构建
+cargo fmt
+cargo fmt --check
+cargo check --target wasm32-unknown-unknown
+cargo clippy -- -D warnings
 worker-build
-
-# 生产构建（优化）
 worker-build --release
 ```
 
-### 部署
+## 5) 测试命令（含单测）
+
+仓库中已有测试（如 `src/core/webauthn.rs`、`src/core/two_factor.rs`、`src/models/cipher.rs`）。
 
 ```bash
-# 部署到 Cloudflare Workers
-wrangler deploy
+# 全量
+cargo test
 
-# 配置 Secrets（生产环境）
-wrangler secret put JWT_SECRET
-wrangler secret put JWT_REFRESH_SECRET
-wrangler secret put ALLOWED_EMAILS
-wrangler secret put TWO_FACTOR_ENC_KEY
+# 单个测试函数（名称过滤）
+cargo test test_encode_b64url
+
+# 单个模块相关测试（路径/名称过滤）
+cargo test webauthn
+
+# 查看测试输出
+cargo test -- --nocapture
 ```
 
-### 数据库操作
+说明：项目主目标是 WASM，但这些单测可直接在 Rust 测试框架下运行。
+
+## 6) D1 常用命令
 
 ```bash
-# 远程数据库初始化（警告：会清空数据）
+wrangler d1 execute vault1 --local --file=sql/schema_full.sql
 wrangler d1 execute vault1 --remote --file=sql/schema_full.sql
-
-# 执行迁移脚本（示例：最新迁移）
-wrangler d1 execute vault1 --remote --file=sql/migrations/20260220_split_webauthn_usage.sql
-
-# 本地数据库查询
 wrangler d1 execute vault1 --local --command="SELECT * FROM users LIMIT 5"
 ```
 
-### 代码质量检查
+## 7) 导入与模块风格
+
+- 导入顺序：标准库 -> 第三方 -> `crate::...`
+- 组间空一行，不混排
+- 内部引用统一走 `crate` 根路径
+
+## 8) 命名规范
+
+- 文件/模块：`snake_case`
+- 函数/变量：`snake_case`
+- 结构体/枚举：`PascalCase`
+- 常量：`SCREAMING_SNAKE_CASE`
+- API 结构体常用：`#[serde(rename_all = "camelCase")]`
+
+## 9) 类型与序列化
+
+- 请求/响应体优先显式结构体，不滥用动态 JSON
+- `Option` 字段按语义使用 `skip_serializing_if`
+- 注意 D1/SQLite 布尔值与数值转换细节
+
+## 10) Handler 约定
+
+- HTTP handler 普遍使用 `#[worker::send]`
+- 常见返回类型：`Result<Json<T>, AppError>`
+- 注入状态常用：`State(env): State<Arc<Env>>`
+- handler 保持薄层：校验 + 调 core + 返回结果
+
+## 11) 错误处理规范（严格）
+
+- 统一错误类型：`AppError`
+- 优先使用：`?`、`map_err`、`ok_or_else`
+- 数据库失败通常映射为 `AppError::Database`
+- 认证失败通常映射为 `Unauthorized` / `BadRequest`
+- 禁止吞错、禁止静默忽略关键失败
+
+推荐模式：
+
+```rust
+let row: Option<Value> = db
+    .prepare("SELECT * FROM users WHERE id = ?1")
+    .bind(&[user_id.into()])?
+    .first(None)
+    .await
+    .map_err(|_| AppError::Database)?;
+
+let row = row.ok_or_else(|| AppError::NotFound("User not found".to_string()))?;
+```
+
+## 12) 明确禁止事项
+
+- 业务代码中使用 `unwrap()` / `expect()`
+- SQL 拼接用户输入
+- 日志打印敏感信息（token/密钥/密码）
+- 通过假成功掩盖错误
+- 未经确认修改关键绑定配置
+
+## 13) SQL 与查询约定
+
+- 使用 `?1`, `?2` 参数占位符
+- 常见风格：`query!` 或 `prepare().bind().run()/first()/all()`
+- 列表接口避免无界查询，必要时加 `LIMIT`
+
+## 14) 时间与 ID
+
+- 时间字符串优先 RFC3339 UTC
+- 主键/请求 ID 常用 `Uuid::new_v4().to_string()`
+
+## 15) 路由与分流认知
+
+- 路由在 `src/router.rs`
+- `src/entry.js` 决定是否 offload 到 `HEAVY_DO`
+- 高频路径要同时评估执行模型与分片策略
+
+## 16) 变更前检查清单
+
+1. 搜索是否已有同类实现
+2. 确认影响层级（handler/core/model/router）
+3. 确认是否涉及 D1 schema/migration
+4. 高频路径确认是否需要 DO offload
+
+## 17) 变更后验证清单
+
+1. `cargo fmt --check`
+2. `cargo check --target wasm32-unknown-unknown`
+3. `worker-build --release`
+4. 运行最小相关测试（必要时全量 `cargo test`）
+
+## 18) 调试与日志
 
 ```bash
-# Rust 格式化检查
-cargo fmt --check
-
-# 应用格式化
-cargo fmt
-
-# Clippy lint 检查
-cargo clippy -- -D warnings
-
-# 编译检查（不生成 wasm）
-cargo check --target wasm32-unknown-unknown
+wrangler tail warden-worker --format json --sampling-rate 0.99
 ```
 
-**注意**：项目当前没有单元测试。添加测试时使用 `cargo test`。
+可结合 `jq` 过滤 `scriptVersion.id`、`cpuTime`、`executionModel`。
 
----
+## 19) 安全相关提示
 
-## 代码风格指南
+- 认证流程依赖 `Claims` 与 `core/jwt.rs`
+- WebAuthn 逻辑位于 `core/webauthn.rs` + `handlers/webauthn.rs`
+- 2FA/TOTP 位于 `core/two_factor.rs` + `handlers/two_factor.rs`
+- 改认证流程时保持错误码与响应结构兼容
 
-### 导入组织
+## 20) 性能相关提示
 
-按以下顺序组织导入，组之间用空行分隔：
+- 避免每请求重复执行固定高成本操作
+- 轮询接口优先控制查询范围与返回大小
+- 热点接口可迁移 DO，但要避免匿名流量单分片热点
 
-```rust
-// 1. 标准库
-use std::sync::Arc;
-use std::convert::TryFrom;
+## 21) Cursor / Copilot 规则整合
 
-// 2. 外部 crate（按字母顺序）
-use axum::{extract::State, Json};
-use chrono::Utc;
-use serde::{Deserialize, Serialize};
-use uuid::Uuid;
-use worker::{query, Env};
+已检查并确认：
 
-// 3. 内部模块（使用 crate::）
-use crate::core::auth::Claims;
-use crate::core::db;
-use crate::core::error::AppError;
-use crate::models::user::User;
-```
+- `.cursor/rules/`：未发现
+- `.cursorrules`：未发现
+- `.github/copilot-instructions.md`：未发现
 
-### 命名约定
+当前仓库无额外 Cursor/Copilot 指令文件。
 
-- **模块**：snake_case（`two_factor.rs`, `auth.rs`）
-- **结构体/枚举**：PascalCase（`AppError`, `Claims`, `CipherData`）
-- **函数/变量**：snake_case（`get_sync_data`, `user_id`）
-- **常量**：SCREAMING_SNAKE_CASE（`JWT_SECRET`）
-- **保留字段**：使用 `r#` 前缀（`r#type`）
+## 22) 常见任务模板
 
-### 错误处理
+### 新增 API
 
-**使用 `AppError` 枚举统一错误类型**：
+1. 在 `src/handlers/*` 增加 handler
+2. 在 `src/router.rs` 注册路由
+3. 必要时下沉逻辑到 `src/core/*`
+4. 更新模型与 SQL（如有）
+5. 运行格式化/检查/构建/测试
 
-```rust
-use crate::core::error::AppError;
+### 排查超时
 
-// 函数签名
-pub async fn handler(claims: Claims, State(env): State<Arc<Env>>) -> Result<Json<Value>, AppError>
+1. 判定 `stateless` 或 `durableObject`
+2. 找固定开销（重复 schema 检查、清理、无界查询）
+3. 再评估是否 offload 到 `HEAVY_DO`
+4. 用 tail + 统计验证效果
 
-// 错误传播
-let db = db::get_db(&env)?;  // Worker 错误自动转换
-let user: User = query!(&db, "SELECT * FROM users WHERE id = ?1", user_id)
-    .map_err(|_| AppError::Database)?  // 显式转换数据库错误
-    .first(None)
-    .await?
-    .ok_or(AppError::NotFound("User not found".to_string()))?;  // Option 转 Result
+## 23) Agent 工作原则
 
-// 自定义错误
-return Err(AppError::BadRequest("Invalid input".to_string()));
-return Err(AppError::Unauthorized("Invalid token".to_string()));
-```
-
-**禁止**：
-- 空的 `catch` 块
-- 使用 `unwrap()` 或 `expect()`（除非在测试或初始化代码中）
-- 忽略错误（使用 `let _ = ...` 除非有充分理由）
-
-### 类型和序列化
-
-**结构体定义**：
-
-```rust
-// API 请求/响应使用 camelCase
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct RegisterRequest {
-    pub email: String,
-    pub master_password_hash: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub master_password_hint: Option<String>,
-    #[serde(default)]
-    pub kdf_iterations: Option<i32>,
-}
-
-// 数据库模型
-#[derive(Debug, Deserialize)]
-pub struct User {
-    pub id: String,
-    pub email: String,
-    #[serde(with = "bool_from_int")]  // SQLite 布尔值转换
-    pub email_verified: bool,
-    pub created_at: String,
-}
-```
-
-**SQLite 布尔值处理**：
-
-D1 数据库将布尔值存储为整数（0/1），需要自定义序列化：
-
-```rust
-#[serde(with = "bool_from_int")]
-pub email_verified: bool,
-
-// 或使用自定义 deserializer
-#[serde(deserialize_with = "deserialize_bool_from_int")]
-pub favorite: bool,
-```
-
-### 异步函数
-
-**Handler 函数使用 `#[worker::send]` 宏**：
-
-```rust
-#[worker::send]
-pub async fn profile(
-    claims: Claims,
-    State(env): State<Arc<Env>>,
-) -> Result<Json<Value>, AppError> {
-    // 实现
-}
-```
-
-**内部辅助函数**：
-
-```rust
-async fn get_cipher_dbmodel(
-    env: &Arc<Env>,
-    cipher_id: &str,
-    user_id: &str,
-) -> Result<CipherDBModel, AppError> {
-    // 实现
-}
-```
-
-### 数据库查询
-
-**使用 `query!` 宏（推荐）**：
-
-```rust
-use worker::query;
-
-let user: User = query!(&db, "SELECT * FROM users WHERE id = ?1", user_id)
-    .map_err(|_| AppError::Database)?
-    .first(None)
-    .await?
-    .ok_or(AppError::NotFound("User not found".to_string()))?;
-```
-
-**使用 `prepare` + `bind`**：
-
-```rust
-let folders: Vec<Folder> = db
-    .prepare("SELECT * FROM folders WHERE user_id = ?1")
-    .bind(&[user_id.into()])?
-    .all()
-    .await?
-    .results()?;
-```
-
-**参数绑定**：
-- 使用 `?1`, `?2` 占位符（从 1 开始）
-- 避免字符串拼接（防止 SQL 注入）
-
-### 时间处理
-
-```rust
-use chrono::Utc;
-
-// 生成 ISO 8601 时间戳
-let now = Utc::now().format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string();
-
-// 解析时间
-let time = chrono::DateTime::parse_from_rfc3339(&user.created_at)
-    .map_err(|_| AppError::Internal)?
-    .to_rfc3339_opts(chrono::SecondsFormat::Micros, true);
-```
-
-### UUID 生成
-
-```rust
-use uuid::Uuid;
-
-let id = Uuid::new_v4().to_string();
-```
-
-### 日志
-
-```rust
-// 初始化（在 lib.rs 中）
-console_error_panic_hook::set_once();
-let _ = console_log::init_with_level(log::Level::Debug);
-
-// 使用
-log::info!("User {} logged in", user_id);
-log::warn!("Cannot parse {err:?} {cipher:?}");
-log::error!("Worker error: {}", e);
-```
-
----
-
-## 架构模式
-
-### 路由定义
-
-在 `router.rs` 中使用 Axum 路由：
-
-```rust
-Router::new()
-    .route("/api/sync", get(sync::get_sync_data))
-    .route("/api/ciphers/create", post(ciphers::create_cipher))
-    .route("/api/ciphers/{id}", put(ciphers::update_cipher).delete(ciphers::hard_delete_cipher))
-    .with_state(app_state)
-```
-
-### 认证
-
-使用 `Claims` 提取器自动验证 JWT（定义于 `src/core/auth.rs`）：
-
-```rust
-pub async fn handler(claims: Claims, State(env): State<Arc<Env>>) -> Result<Json<Value>, AppError> {
-    let user_id = claims.sub;  // 已验证的用户 ID
-    // ...
-}
-```
-
-`Claims` 结构体包含：
-- `sub`：用户 ID
-- `email`：用户邮箱
-- `device`：设备标识符（登录后设置）
-- `exp` / `nbf`：JWT 过期/生效时间
-
-### WebAuthn
-
-WebAuthn 相关逻辑拆分为两个层次：
-- `src/core/webauthn.rs`：底层注册（attestation）与登录（assertion）验证逻辑
-- `src/handlers/webauthn.rs`：HTTP 接口，处理通行密钥的注册、管理和 2FA WebAuthn
-
-WebAuthn 凭据支持 PRF 扩展，可用于无主密码的客户端加密密钥派生。
-
-### 设备与 Auth Request 流程
-
-Auth Request 是官方客户端"通过已登录设备授权新设备"的机制，流程：
-1. 新设备发起 `POST /api/auth-requests`
-2. 已登录设备轮询 `GET /api/auth-requests/pending` 并通过 `PUT /api/auth-requests/{id}` 批准
-3. 新设备通过 `GET /api/auth-requests/{id}/response` 获取加密后的主密钥
-
-### 环境变量和 Secrets
-
-```rust
-// 获取 Secret
-let jwt_secret = env.secret("JWT_SECRET")?;
-
-// 获取 D1 数据库
-let db = env.d1("vault1").map_err(AppError::Worker)?;
-```
-
-### 响应格式
-
-返回 JSON 使用 `Json` 包装器：
-
-```rust
-Ok(Json(json!({
-    "id": user.id,
-    "email": user.email,
-    "object": "profile"
-})))
-```
-
----
-
-## 安全注意事项
-
-1. **密码验证**：使用 `constant_time_eq` 防止时序攻击
-   ```rust
-   use constant_time_eq::constant_time_eq;
-   
-   if !constant_time_eq(hash1.as_bytes(), hash2.as_bytes()) {
-       return Err(AppError::Unauthorized("Invalid password".to_string()));
-   }
-   ```
-
-2. **JWT 验证**：检查 `exp`（过期时间）和 `nbf`（生效时间）
-
-3. **SQL 注入**：始终使用参数化查询，禁止字符串拼接
-
-4. **敏感数据**：不在日志中输出密码、token、密钥
-
-5. **WebAuthn Referer 校验**：`core/webauthn.rs` 会校验请求来源，确保 origin 与服务端域名匹配
-
----
-
-## 常见任务
-
-### 添加新的 API 端点
-
-1. 在 `src/handlers/` 创建或修改处理器函数
-2. 在 `src/router.rs` 添加路由
-3. 如需新数据模型，在 `src/models/` 定义
-4. 如需核心逻辑，在 `src/core/` 对应模块添加
-5. 更新数据库 schema（如需要）
-
-### 数据库迁移
-
-1. 在 `sql/migrations/` 创建迁移文件（格式：`YYYYMMDD_description.sql`）
-2. 使用 `wrangler d1 execute` 执行迁移
-3. 更新 `sql/schema_full.sql`（用于全新部署）
-
-### 调试
-
-1. 使用 `log::debug!()` 添加日志
-2. 本地运行 `wrangler dev` 查看实时日志
-3. 生产环境在 Cloudflare Dashboard 查看 Workers 日志
-
----
-
-## 禁止事项
-
-- ❌ 使用 `panic!()`, `unwrap()`, `expect()`（除非在初始化代码）
-- ❌ 忽略错误（使用 `?` 或显式处理）
-- ❌ SQL 字符串拼接
-- ❌ 在日志中输出敏感信息
-- ❌ 硬编码密钥或凭证
-- ❌ 修改 `wrangler.jsonc` 中的 `database_id`（使用 Secrets 或环境变量）
-- ❌ 在 handler 中直接引用 `crate::auth` 等旧路径（核心模块已统一移至 `crate::core::*`）
-
----
-
-## 参考资源
-
-- [Cloudflare Workers 文档](https://developers.cloudflare.com/workers/)
-- [worker-rs GitHub](https://github.com/cloudflare/workers-rs)
-- [Axum 文档](https://docs.rs/axum/)
-- [Bitwarden API 文档](https://bitwarden.com/help/api/)
-- [WebAuthn 规范](https://www.w3.org/TR/webauthn-3/)
+1. 先证据后结论（给出文件位置）
+2. 最小改动，不扩散需求
+3. 风格一致（命名、错误、SQL、响应）
+4. 改动后必须可验证、可复现
+5. 复杂问题分阶段：定位 -> 修复 -> 验证
