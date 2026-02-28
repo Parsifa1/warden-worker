@@ -42,6 +42,7 @@ pub fn api_router(env: Env) -> Router {
             get(identity::webauthn_assertion_options).post(identity::webauthn_assertion_options),
         )
         .route("/api/accounts/profile", get(accounts::profile))
+        .route("/api/accounts/kdf", post(accounts::post_kdf))
         .route("/api/accounts/revision-date", get(accounts::revision_date))
         .route(
             "/api/accounts/verify-password",

@@ -103,8 +103,8 @@ pub async fn get_sync_data(
             "kdf": {
                 "kdfType": user.kdf_type,
                 "iterations": user.kdf_iterations,
-                "memory": null,
-                "parallelism": null
+                "memory": user.kdf_memory,
+                "parallelism": user.kdf_parallelism
             },
             "masterKeyEncryptedUserKey": user.key,
             "masterKeyWrappedUserKey": user.key,

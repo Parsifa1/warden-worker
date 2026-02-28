@@ -117,8 +117,8 @@ fn generate_tokens_and_response(
             "Kdf": {
                 "KdfType": user.kdf_type,
                 "Iterations": user.kdf_iterations,
-                "Memory": null,
-                "Parallelism": null
+                "Memory": user.kdf_memory,
+                "Parallelism": user.kdf_parallelism
             },
             "MasterKeyEncryptedUserKey": user.key,
             "MasterKeyWrappedUserKey": user.key,
@@ -143,8 +143,8 @@ fn generate_tokens_and_response(
         "ForcePasswordReset": false,
         "Kdf": user.kdf_type,
         "KdfIterations": user.kdf_iterations,
-        "KdfMemory": null,
-        "KdfParallelism": null,
+        "KdfMemory": user.kdf_memory,
+        "KdfParallelism": user.kdf_parallelism,
         "Key": user.key,
         "MasterPasswordPolicy": { "Object": "masterPasswordPolicy" },
         "PrivateKey": user.private_key,

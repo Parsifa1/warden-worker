@@ -28,6 +28,10 @@ pub struct ChangeMasterPasswordRequest {
     pub kdf: Option<i32>,
     #[serde(default)]
     pub kdf_iterations: Option<i32>,
+    #[serde(default)]
+    pub kdf_memory: Option<i32>,
+    #[serde(default)]
+    pub kdf_parallelism: Option<i32>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -41,6 +45,10 @@ pub struct ChangeEmailRequest {
     pub kdf: Option<i32>,
     #[serde(default)]
     pub kdf_iterations: Option<i32>,
+    #[serde(default)]
+    pub kdf_memory: Option<i32>,
+    #[serde(default)]
+    pub kdf_parallelism: Option<i32>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -62,6 +70,87 @@ pub struct ProfileData {
 pub struct VerifyPasswordRequest {
     #[serde(alias = "MasterPasswordHash")]
     pub master_password_hash: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChangeKdfFlatRequest {
+    #[serde(alias = "MasterPasswordHash")]
+    pub master_password_hash: String,
+    #[serde(alias = "NewMasterPasswordHash")]
+    pub new_master_password_hash: String,
+    #[serde(alias = "Key")]
+    pub key: String,
+    #[serde(alias = "kdfType", alias = "KdfType")]
+    pub kdf: i32,
+    #[serde(alias = "KdfIterations", alias = "iterations", alias = "Iterations")]
+    pub kdf_iterations: i32,
+    #[serde(default)]
+    #[serde(alias = "KdfMemory", alias = "memory", alias = "Memory")]
+    pub kdf_memory: Option<i32>,
+    #[serde(default)]
+    #[serde(alias = "KdfParallelism", alias = "parallelism", alias = "Parallelism")]
+    pub kdf_parallelism: Option<i32>,
+}
+
+#[derive(Debug, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ChangeKdfParams {
+    #[serde(alias = "kdfType", alias = "KdfType")]
+    pub kdf: i32,
+    #[serde(alias = "KdfIterations", alias = "iterations", alias = "Iterations")]
+    pub kdf_iterations: i32,
+    #[serde(default)]
+    #[serde(alias = "KdfMemory", alias = "memory", alias = "Memory")]
+    pub kdf_memory: Option<i32>,
+    #[serde(default)]
+    #[serde(alias = "KdfParallelism", alias = "parallelism", alias = "Parallelism")]
+    pub kdf_parallelism: Option<i32>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChangeKdfData {
+    #[serde(alias = "Kdf")]
+    pub kdf: ChangeKdfParams,
+    #[serde(alias = "Salt")]
+    pub salt: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChangeKdfVwRequest {
+    #[serde(alias = "MasterPasswordHash")]
+    pub master_password_hash: String,
+    #[serde(alias = "NewMasterPasswordHash")]
+    pub new_master_password_hash: String,
+    #[serde(alias = "Key")]
+    pub key: String,
+    #[serde(alias = "AuthenticationData")]
+    pub authentication_data: ChangeKdfData,
+    #[serde(alias = "UnlockData")]
+    pub unlock_data: ChangeKdfData,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChangeKdfObjectRequest {
+    #[serde(alias = "MasterPasswordHash")]
+    pub master_password_hash: String,
+    #[serde(alias = "NewMasterPasswordHash")]
+    pub new_master_password_hash: String,
+    #[serde(alias = "Key")]
+    pub key: String,
+    #[serde(alias = "Kdf")]
+    pub kdf: ChangeKdfParams,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+pub enum ChangeKdfPayload {
+    Vw(ChangeKdfVwRequest),
+    Obj(ChangeKdfObjectRequest),
+    Flat(ChangeKdfFlatRequest),
 }
 
 #[worker::send]
@@ -170,6 +259,112 @@ pub async fn revision_date(_claims: Claims) -> Result<Json<i64>, AppError> {
 }
 
 #[worker::send]
+pub async fn post_kdf(
+    claims: Claims,
+    State(env): State<Arc<Env>>,
+    Json(payload): Json<ChangeKdfPayload>,
+) -> Result<Json<Value>, AppError> {
+    let db = db::get_db(&env)?;
+    let user: Value = db
+        .prepare("SELECT * FROM users WHERE id = ?1")
+        .bind(&[claims.sub.clone().into()])?
+        .first(None)
+        .await
+        .map_err(|_| AppError::Database)?
+        .ok_or_else(|| AppError::NotFound("User not found".to_string()))?;
+    let user: User = serde_json::from_value(user).map_err(|_| AppError::Internal)?;
+
+    let provided_old_hash = match &payload {
+        ChangeKdfPayload::Vw(p) => &p.master_password_hash,
+        ChangeKdfPayload::Obj(p) => &p.master_password_hash,
+        ChangeKdfPayload::Flat(p) => &p.master_password_hash,
+    };
+
+    if !constant_time_eq(
+        user.master_password_hash.as_bytes(),
+        provided_old_hash.as_bytes(),
+    ) {
+        return Err(AppError::Unauthorized("Invalid credentials".to_string()));
+    }
+
+    let (new_master_password_hash, key, kdf_type, kdf_iterations, kdf_memory, kdf_parallelism) =
+        match &payload {
+            ChangeKdfPayload::Vw(p) => {
+                if p.authentication_data.kdf != p.unlock_data.kdf {
+                    return Err(AppError::BadRequest(
+                        "KDF settings must be equal for authentication and unlock".to_string(),
+                    ));
+                }
+                if !user.email.eq_ignore_ascii_case(&p.authentication_data.salt)
+                    || !user.email.eq_ignore_ascii_case(&p.unlock_data.salt)
+                {
+                    return Err(AppError::BadRequest(
+                        "Invalid master password salt".to_string(),
+                    ));
+                }
+
+                (
+                    p.new_master_password_hash.clone(),
+                    p.key.clone(),
+                    p.unlock_data.kdf.kdf,
+                    p.unlock_data.kdf.kdf_iterations,
+                    p.unlock_data.kdf.kdf_memory,
+                    p.unlock_data.kdf.kdf_parallelism,
+                )
+            }
+            ChangeKdfPayload::Obj(p) => (
+                p.new_master_password_hash.clone(),
+                p.key.clone(),
+                p.kdf.kdf,
+                p.kdf.kdf_iterations,
+                p.kdf.kdf_memory,
+                p.kdf.kdf_parallelism,
+            ),
+            ChangeKdfPayload::Flat(p) => (
+                p.new_master_password_hash.clone(),
+                p.key.clone(),
+                p.kdf,
+                p.kdf_iterations,
+                p.kdf_memory,
+                p.kdf_parallelism,
+            ),
+        };
+
+    validate_kdf(kdf_type, kdf_iterations, kdf_memory, kdf_parallelism)?;
+    if new_master_password_hash.is_empty() {
+        return Err(AppError::BadRequest(
+            "Missing newMasterPasswordHash".to_string(),
+        ));
+    }
+    if key.is_empty() {
+        return Err(AppError::BadRequest("Missing key".to_string()));
+    }
+
+    let now = crate::utils::time_now();
+    let security_stamp = Uuid::new_v4().to_string();
+
+    db.prepare(
+        "UPDATE users SET master_password_hash = ?1, key = ?2, kdf_type = ?3, kdf_iterations = ?4, kdf_memory = ?5, kdf_parallelism = ?6, security_stamp = ?7, updated_at = ?8 WHERE id = ?9",
+    )
+    .bind(&[
+        new_master_password_hash.into(),
+        key.into(),
+        kdf_type.into(),
+        kdf_iterations.into(),
+        to_js_val(kdf_memory),
+        to_js_val(kdf_parallelism),
+        security_stamp.into(),
+        now.into(),
+        claims.sub.into(),
+    ])?
+    .run()
+    .await
+    .map_err(|_| AppError::Database)?;
+
+    Ok(Json(json!({})))
+}
+
+#[worker::send]
 pub async fn prelogin(
     State(env): State<Arc<Env>>,
     headers: HeaderMap,
@@ -197,7 +392,9 @@ pub async fn prelogin(
 
     let db = db::get_db(&env)?;
 
-    let stmt = db.prepare("SELECT kdf_type, kdf_iterations FROM users WHERE email = ?1");
+    let stmt = db.prepare(
+        "SELECT kdf_type, kdf_iterations, kdf_memory, kdf_parallelism FROM users WHERE email = ?1",
+    );
     let query = stmt.bind(&[email.to_lowercase().into()])?;
     let kdf_row: Option<Value> = query.first(None).await.map_err(|_| AppError::Database)?;
     let kdf = kdf_row
@@ -212,12 +409,22 @@ pub async fn prelogin(
         .and_then(|v| v.as_i64())
         .map(|v| v as i32)
         .unwrap_or(600_000);
+    let kdf_memory = kdf_row
+        .as_ref()
+        .and_then(|row| row.get("kdf_memory"))
+        .and_then(|v| v.as_i64())
+        .map(|v| v as i32);
+    let kdf_parallelism = kdf_row
+        .as_ref()
+        .and_then(|row| row.get("kdf_parallelism"))
+        .and_then(|v| v.as_i64())
+        .map(|v| v as i32);
 
     Ok(Json(PreloginResponse {
         kdf,
         kdf_iterations,
-        kdf_memory: None,
-        kdf_parallelism: None,
+        kdf_memory,
+        kdf_parallelism,
     }))
 }
 
@@ -266,6 +473,13 @@ pub async fn register(
         }
     }
     let now = crate::utils::time_now();
+    validate_kdf(
+        payload.kdf,
+        payload.kdf_iterations,
+        payload.kdf_memory,
+        payload.kdf_parallelism,
+    )?;
+
     let user = User {
         id: Uuid::new_v4().to_string(),
         name: payload.name,
@@ -278,29 +492,34 @@ pub async fn register(
         public_key: payload.user_asymmetric_keys.public_key,
         kdf_type: payload.kdf,
         kdf_iterations: payload.kdf_iterations,
+        kdf_memory: payload.kdf_memory,
+        kdf_parallelism: payload.kdf_parallelism,
         security_stamp: Uuid::new_v4().to_string(),
         avatar_color: None,
         created_at: now.clone(),
         updated_at: now,
     };
 
-    query!(
-        &db,
-        "INSERT INTO users (id, name, email, master_password_hash, key, private_key, public_key, kdf_type, kdf_iterations, security_stamp, created_at, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
-         user.id,
-         user.name,
-         user.email,
-         user.master_password_hash,
-         user.key,
-         user.private_key,
-         user.public_key,
-         user.kdf_type,
-         user.kdf_iterations,
-         user.security_stamp,
-         user.created_at,
-         user.updated_at
-    ).map_err(|_| AppError::Database)?
+    db.prepare(
+        "INSERT INTO users (id, name, email, master_password_hash, key, private_key, public_key, kdf_type, kdf_iterations, kdf_memory, kdf_parallelism, security_stamp, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
+    )
+    .bind(&[
+        user.id.into(),
+        to_js_val(user.name),
+        user.email.into(),
+        user.master_password_hash.into(),
+        user.key.into(),
+        user.private_key.into(),
+        user.public_key.into(),
+        user.kdf_type.into(),
+        user.kdf_iterations.into(),
+        to_js_val(user.kdf_memory),
+        to_js_val(user.kdf_parallelism),
+        user.security_stamp.into(),
+        user.created_at.into(),
+        user.updated_at.into(),
+    ])?
     .run()
     .await
     .map_err(|_| AppError::Database)?;
@@ -355,9 +574,12 @@ pub async fn change_master_password(
         .unwrap_or_else(|| user.public_key.clone());
     let kdf_type = payload.kdf.unwrap_or(user.kdf_type);
     let kdf_iterations = payload.kdf_iterations.unwrap_or(user.kdf_iterations);
+    let kdf_memory = payload.kdf_memory.or(user.kdf_memory);
+    let kdf_parallelism = payload.kdf_parallelism.or(user.kdf_parallelism);
+    validate_kdf(kdf_type, kdf_iterations, kdf_memory, kdf_parallelism)?;
 
     db.prepare(
-        "UPDATE users SET master_password_hash = ?1, master_password_hint = ?2, key = ?3, private_key = ?4, public_key = ?5, kdf_type = ?6, kdf_iterations = ?7, security_stamp = ?8, updated_at = ?9 WHERE id = ?10",
+        "UPDATE users SET master_password_hash = ?1, master_password_hint = ?2, key = ?3, private_key = ?4, public_key = ?5, kdf_type = ?6, kdf_iterations = ?7, kdf_memory = ?8, kdf_parallelism = ?9, security_stamp = ?10, updated_at = ?11 WHERE id = ?12",
     )
     .bind(&[
         payload.new_master_password_hash.into(),
@@ -367,6 +589,8 @@ pub async fn change_master_password(
         public_key.into(),
         kdf_type.into(),
         kdf_iterations.into(),
+        to_js_val(kdf_memory),
+        to_js_val(kdf_parallelism),
         security_stamp.into(),
         now.into(),
         claims.sub.into(),
@@ -419,9 +643,12 @@ pub async fn change_email(
     let security_stamp = Uuid::new_v4().to_string();
     let kdf_type = payload.kdf.unwrap_or(user.kdf_type);
     let kdf_iterations = payload.kdf_iterations.unwrap_or(user.kdf_iterations);
+    let kdf_memory = payload.kdf_memory.or(user.kdf_memory);
+    let kdf_parallelism = payload.kdf_parallelism.or(user.kdf_parallelism);
+    validate_kdf(kdf_type, kdf_iterations, kdf_memory, kdf_parallelism)?;
 
     db.prepare(
-        "UPDATE users SET email = ?1, email_verified = ?2, master_password_hash = ?3, key = ?4, kdf_type = ?5, kdf_iterations = ?6, security_stamp = ?7, updated_at = ?8 WHERE id = ?9",
+        "UPDATE users SET email = ?1, email_verified = ?2, master_password_hash = ?3, key = ?4, kdf_type = ?5, kdf_iterations = ?6, kdf_memory = ?7, kdf_parallelism = ?8, security_stamp = ?9, updated_at = ?10 WHERE id = ?11",
     )
     .bind(&[
         new_email.into(),
@@ -430,6 +657,8 @@ pub async fn change_email(
         payload.user_symmetric_key.into(),
         kdf_type.into(),
         kdf_iterations.into(),
+        to_js_val(kdf_memory),
+        to_js_val(kdf_parallelism),
         security_stamp.into(),
         now.into(),
         claims.sub.into(),
@@ -449,6 +678,125 @@ pub async fn change_email(
 
 fn to_js_val<T: Into<JsValue>>(val: Option<T>) -> JsValue {
     val.map(Into::into).unwrap_or(JsValue::NULL)
+}
+
+fn validate_kdf(
+    kdf_type: i32,
+    kdf_iterations: i32,
+    kdf_memory: Option<i32>,
+    kdf_parallelism: Option<i32>,
+) -> Result<(), AppError> {
+    const PBKDF2_KDF_TYPE: i32 = 0;
+    const ARGON2ID_KDF_TYPE: i32 = 1;
+    const PBKDF2_MIN_ITERATIONS: i32 = 600_000;
+    const ARGON2ID_MIN_MEMORY_MB: i32 = 15;
+    const ARGON2ID_MAX_MEMORY_MB: i32 = 1024;
+    const ARGON2ID_MIN_PARALLELISM: i32 = 1;
+    const ARGON2ID_MAX_PARALLELISM: i32 = 16;
+
+    if kdf_type != PBKDF2_KDF_TYPE && kdf_type != ARGON2ID_KDF_TYPE {
+        return Err(AppError::BadRequest("Unsupported KDF type".to_string()));
+    }
+    if kdf_type < 0 {
+        return Err(AppError::BadRequest("Invalid KDF type".to_string()));
+    }
+    if kdf_iterations <= 0 {
+        return Err(AppError::BadRequest("Invalid KDF iterations".to_string()));
+    }
+
+    if kdf_type == PBKDF2_KDF_TYPE {
+        if kdf_iterations < PBKDF2_MIN_ITERATIONS {
+            return Err(AppError::BadRequest(
+                "PBKDF2 requires at least 600000 iterations".to_string(),
+            ));
+        }
+        return Ok(());
+    }
+
+    let Some(kdf_memory) = kdf_memory else {
+        return Err(AppError::BadRequest(
+            "Argon2id requires kdfMemory".to_string(),
+        ));
+    };
+    let Some(kdf_parallelism) = kdf_parallelism else {
+        return Err(AppError::BadRequest(
+            "Argon2id requires kdfParallelism".to_string(),
+        ));
+    };
+
+    if !(ARGON2ID_MIN_MEMORY_MB..=ARGON2ID_MAX_MEMORY_MB).contains(&kdf_memory) {
+        return Err(AppError::BadRequest(
+            "Argon2id kdfMemory must be between 15 and 1024".to_string(),
+        ));
+    }
+    if !(ARGON2ID_MIN_PARALLELISM..=ARGON2ID_MAX_PARALLELISM).contains(&kdf_parallelism) {
+        return Err(AppError::BadRequest(
+            "Argon2id kdfParallelism must be between 1 and 16".to_string(),
+        ));
+    }
+
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{validate_kdf, ChangeKdfPayload};
+    use serde_json::json;
+
+    #[test]
+    fn validate_kdf_pbkdf2_requires_min_iterations() {
+        assert!(validate_kdf(0, 599_999, None, None).is_err());
+        assert!(validate_kdf(0, 600_000, None, None).is_ok());
+    }
+
+    #[test]
+    fn validate_kdf_argon2id_requires_memory_and_parallelism() {
+        assert!(validate_kdf(1, 3, None, Some(4)).is_err());
+        assert!(validate_kdf(1, 3, Some(64), None).is_err());
+        assert!(validate_kdf(1, 3, Some(64), Some(4)).is_ok());
+    }
+
+    #[test]
+    fn validate_kdf_argon2id_enforces_ranges() {
+        assert!(validate_kdf(1, 3, Some(14), Some(4)).is_err());
+        assert!(validate_kdf(1, 3, Some(1025), Some(4)).is_err());
+        assert!(validate_kdf(1, 3, Some(64), Some(0)).is_err());
+        assert!(validate_kdf(1, 3, Some(64), Some(17)).is_err());
+        assert!(validate_kdf(1, 3, Some(64), Some(4)).is_ok());
+    }
+
+    #[test]
+    fn validate_kdf_rejects_unsupported_kdf_type() {
+        assert!(validate_kdf(2, 1, None, None).is_err());
+        assert!(validate_kdf(-1, 1, None, None).is_err());
+    }
+
+    #[test]
+    fn change_kdf_payload_deserializes_flat_and_object_kdf_shapes() {
+        let flat = json!({
+            "masterPasswordHash": "old",
+            "newMasterPasswordHash": "new",
+            "key": "k",
+            "kdf": 1,
+            "kdfIterations": 3,
+            "kdfMemory": 64,
+            "kdfParallelism": 4
+        });
+        let obj = json!({
+            "MasterPasswordHash": "old",
+            "NewMasterPasswordHash": "new",
+            "Key": "k",
+            "Kdf": {
+                "KdfType": 1,
+                "Iterations": 3,
+                "Memory": 64,
+                "Parallelism": 4
+            }
+        });
+
+        assert!(serde_json::from_value::<ChangeKdfPayload>(flat).is_ok());
+        assert!(serde_json::from_value::<ChangeKdfPayload>(obj).is_ok());
+    }
 }
 
 #[worker::send]

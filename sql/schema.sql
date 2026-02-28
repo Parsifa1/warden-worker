@@ -22,6 +22,8 @@ CREATE TABLE IF NOT EXISTS users (
     public_key TEXT NOT NULL, -- asymmetric public_key
     kdf_type INTEGER NOT NULL DEFAULT 0, -- 0 for PBKDF2
     kdf_iterations INTEGER NOT NULL DEFAULT 600000,
+    kdf_memory INTEGER,
+    kdf_parallelism INTEGER,
     security_stamp TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
