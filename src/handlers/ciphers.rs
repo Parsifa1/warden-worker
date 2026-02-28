@@ -1,5 +1,6 @@
 use axum::{extract::State, Json};
 use chrono::Utc;
+use serde_json::Value;
 use std::sync::Arc;
 use uuid::Uuid;
 use worker::{query, Env};
@@ -104,13 +105,30 @@ async fn create_cipher_inner(
     Ok(Json(cipher))
 }
 
+fn parse_create_cipher_payload(
+    payload: Value,
+) -> Result<(CipherRequestData, Vec<String>), AppError> {
+    let wrapped = serde_json::from_value::<CreateCipherRequest>(payload.clone());
+
+    match wrapped {
+        Ok(req) => Ok((req.cipher, req.collection_ids)),
+        Err(_) => {
+            let flat = serde_json::from_value::<CipherRequestFlat>(payload)
+                .map_err(|_| AppError::BadRequest("Invalid cipher payload".to_string()))?;
+            Ok((flat.cipher, flat.collection_ids))
+        }
+    }
+}
+
 #[worker::send]
 pub async fn create_cipher(
     claims: Claims,
     State(env): State<Arc<Env>>,
-    Json(payload): Json<CreateCipherRequest>,
+    Json(payload): Json<Value>,
 ) -> Result<Json<Cipher>, AppError> {
-    create_cipher_inner(claims, &env, payload.cipher, payload.collection_ids).await
+    let (cipher, collection_ids) = parse_create_cipher_payload(payload)?;
+
+    create_cipher_inner(claims, &env, cipher, collection_ids).await
 }
 
 #[worker::send]
@@ -370,4 +388,93 @@ pub async fn hard_delete_ciphers_delete(
     Json(payload): Json<CipherIdsRequest>,
 ) -> Result<Json<()>, AppError> {
     hard_delete_ciphers(claims, State(env), Json(payload)).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_create_cipher_payload;
+    use serde_json::json;
+
+    #[test]
+    fn parse_create_cipher_payload_accepts_wrapped_shape() {
+        let payload = json!({
+            "cipher": {
+                "type": 1,
+                "name": "enc-name",
+                "favorite": false,
+                "login": {"username": "enc-user", "password": "enc-pass"}
+            },
+            "collectionIds": ["c1"]
+        });
+
+        let (cipher, collections) =
+            parse_create_cipher_payload(payload).expect("wrapped should parse");
+
+        assert_eq!(cipher.r#type, 1);
+        assert_eq!(cipher.name, "enc-name");
+        assert_eq!(cipher.favorite, false);
+        assert_eq!(collections, vec!["c1".to_string()]);
+    }
+
+    #[test]
+    fn parse_create_cipher_payload_accepts_pascalcase_wrapped_shape() {
+        let payload = json!({
+            "Cipher": {
+                "type": 1,
+                "name": "enc-name",
+                "favorite": false,
+                "login": {"username": "enc-user", "password": "enc-pass"}
+            },
+            "CollectionIds": ["c1"]
+        });
+
+        let (cipher, collections) =
+            parse_create_cipher_payload(payload).expect("pascal wrapped should parse");
+
+        assert_eq!(cipher.r#type, 1);
+        assert_eq!(cipher.name, "enc-name");
+        assert_eq!(cipher.favorite, false);
+        assert_eq!(collections, vec!["c1".to_string()]);
+    }
+
+    #[test]
+    fn parse_create_cipher_payload_accepts_flat_shape() {
+        let payload = json!({
+            "type": 1,
+            "name": "enc-name",
+            "favorite": true,
+            "login": {"username": "enc-user", "password": "enc-pass"},
+            "collectionIds": ["c1", "c2"]
+        });
+
+        let (cipher, collections) =
+            parse_create_cipher_payload(payload).expect("flat should parse");
+
+        assert_eq!(cipher.r#type, 1);
+        assert_eq!(cipher.name, "enc-name");
+        assert_eq!(cipher.favorite, true);
+        assert_eq!(collections, vec!["c1".to_string(), "c2".to_string()]);
+    }
+
+    #[test]
+    fn parse_create_cipher_payload_accepts_int_favorite() {
+        let payload = json!({
+            "type": 1,
+            "name": "enc-name",
+            "favorite": 1,
+            "login": {"username": "enc-user", "password": "enc-pass"}
+        });
+
+        let (cipher, collections) =
+            parse_create_cipher_payload(payload).expect("int favorite should parse");
+
+        assert_eq!(cipher.favorite, true);
+        assert!(collections.is_empty());
+    }
+
+    #[test]
+    fn parse_create_cipher_payload_rejects_invalid_shape() {
+        let payload = json!({ "foo": "bar" });
+        assert!(parse_create_cipher_payload(payload).is_err());
+    }
 }

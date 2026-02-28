@@ -66,6 +66,58 @@ where
     deserializer.deserialize_any(BoolOrIntVisitor)
 }
 
+fn deserialize_bool_from_int_or_bool<'de, D>(deserializer: D) -> Result<bool, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    struct BoolOrIntVisitor;
+
+    impl<'de> de::Visitor<'de> for BoolOrIntVisitor {
+        type Value = bool;
+
+        fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+            formatter.write_str("a boolean or an integer 0 or 1")
+        }
+
+        fn visit_bool<E>(self, value: bool) -> Result<bool, E>
+        where
+            E: de::Error,
+        {
+            Ok(value)
+        }
+
+        fn visit_u64<E>(self, value: u64) -> Result<bool, E>
+        where
+            E: de::Error,
+        {
+            match value {
+                0 => Ok(false),
+                1 => Ok(true),
+                _ => Err(de::Error::invalid_value(
+                    de::Unexpected::Unsigned(value),
+                    &"0 or 1",
+                )),
+            }
+        }
+
+        fn visit_i64<E>(self, value: i64) -> Result<bool, E>
+        where
+            E: de::Error,
+        {
+            match value {
+                0 => Ok(false),
+                1 => Ok(true),
+                _ => Err(de::Error::invalid_value(
+                    de::Unexpected::Signed(value),
+                    &"0 or 1",
+                )),
+            }
+        }
+    }
+
+    deserializer.deserialize_any(BoolOrIntVisitor)
+}
+
 // The struct that is stored in the database and used in handlers.
 // For serialization to JSON for the client, we implement a custom `Serialize`.
 #[derive(Debug, Deserialize, Clone)]
@@ -304,7 +356,7 @@ pub struct CipherRequestData {
     pub name: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub notes: Option<String>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_bool_from_int_or_bool")]
     pub favorite: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub login: Option<Value>,
@@ -326,9 +378,11 @@ pub struct CipherRequestData {
 
 // Represents the full request payload for creating a cipher.
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct CreateCipherRequest {
+    #[serde(alias = "Cipher")]
     pub cipher: CipherRequestData,
-    #[serde(default)]
+    #[serde(default, alias = "CollectionIds")]
     pub collection_ids: Vec<String>,
 }
 
