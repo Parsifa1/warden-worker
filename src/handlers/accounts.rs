@@ -800,8 +800,8 @@ mod tests {
 }
 
 #[worker::send]
-pub async fn send_verification_email() -> String {
-    "fixed-token-to-mock".to_string()
+pub async fn send_verification_email() -> Result<Json<String>, AppError> {
+    Ok(Json("fixed-token-to-mock".to_string()))
 }
 
 #[worker::send]
