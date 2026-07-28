@@ -1,4 +1,4 @@
-use axum::{extract::State, Json};
+use axum::{extract::State, http::StatusCode, Json};
 use chrono::Utc;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -56,7 +56,7 @@ pub async fn delete_folder(
     claims: Claims,
     State(env): State<Arc<Env>>,
     Path(id): Path<String>,
-) -> Result<Json<()>, AppError> {
+) -> Result<(StatusCode, ()), AppError> {
     let db = db::get_db(&env)?;
 
     query!(
@@ -69,7 +69,7 @@ pub async fn delete_folder(
     .run()
     .await?;
 
-    Ok(Json(()))
+    Ok((StatusCode::NO_CONTENT, ()))
 }
 #[worker::send]
 pub async fn update_folder(
