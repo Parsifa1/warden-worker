@@ -765,9 +765,7 @@ pub async fn post_access(
     validate_send_access(&send)?;
     validate_send_password(&send, payload.password)?;
 
-    if send.r#type == SEND_TYPE_TEXT
-        && !update_send_access_count(&db, &send.id).await?
-    {
+    if send.r#type == SEND_TYPE_TEXT && !update_send_access_count(&db, &send.id).await? {
         return Err(AppError::NotFound("Send access limit reached".to_string()));
     }
 
