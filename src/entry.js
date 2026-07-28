@@ -158,18 +158,16 @@ function computeRequestShard(url, tokenSub) {
     return `user:${tokenSub}`;
   }
 
-  if (url.pathname === "/icons" || url.pathname.startsWith("/icons/")) {
-    const host = (url.searchParams.get("hostname") || url.searchParams.get("domain") || "default").toLowerCase();
-    const bucket = host.charCodeAt(0) % 16;
-    return `icons-bucket:${bucket}`;
-  }
 
   if (url.pathname === "/api/auth-requests" || url.pathname.startsWith("/api/auth-requests/")) {
     const idSeed = `${url.pathname}|${url.searchParams.get("code") || ""}`;
-    const bucket = idSeed.charCodeAt(0) % 16;
+    let h = 0;
+    for (let i = 0; i < idSeed.length; i++) {
+      h = ((h * 31) + idSeed.charCodeAt(i)) | 0;
+    }
+    const bucket = Math.abs(h) % 16;
     return `auth-requests-bucket:${bucket}`;
   }
-
   return "user:default";
 }
 

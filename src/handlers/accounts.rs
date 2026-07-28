@@ -53,20 +53,6 @@ pub struct ChangeEmailRequest {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-#[allow(dead_code)]
-pub struct UpdateAvatarRequest {
-    pub avatar_color: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-#[allow(dead_code)]
-pub struct ProfileData {
-    pub name: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
 pub struct VerifyPasswordRequest {
     #[serde(alias = "MasterPasswordHash")]
     pub master_password_hash: String,
@@ -181,32 +167,6 @@ pub async fn profile(claims: Claims, State(env): State<Arc<Env>>) -> Result<Json
         "organizations": [],
         "object": "profile"
     })))
-}
-
-#[worker::send]
-pub async fn post_profile(
-    claims: Claims,
-    State(env): State<Arc<Env>>,
-    Json(payload): Json<ProfileData>,
-) -> Result<Json<Value>, AppError> {
-    let name = payload.name.unwrap_or_default();
-
-    if name.len() > 50 {
-        return Err(AppError::BadRequest(
-            "The field Name must be a string with a maximum length of 50.".to_string(),
-        ));
-    }
-
-    let db = db::get_db(&env)?;
-    let now = crate::utils::time_now();
-
-    db.prepare("UPDATE users SET name = ?1, updated_at = ?2 WHERE id = ?3")
-        .bind(&[name.into(), now.into(), claims.sub.clone().into()])?
-        .run()
-        .await
-        .map_err(|_| AppError::Database)?;
-
-    profile(claims, State(env)).await
 }
 
 #[worker::send]
@@ -802,61 +762,6 @@ mod tests {
 #[worker::send]
 pub async fn send_verification_email() -> Result<Json<String>, AppError> {
     Ok(Json("fixed-token-to-mock".to_string()))
-}
-
-#[worker::send]
-pub async fn update_avatar(
-    claims: Claims,
-    State(env): State<Arc<Env>>,
-    Json(payload): Json<UpdateAvatarRequest>,
-) -> Result<Json<Value>, AppError> {
-    if let Some(ref color) = payload.avatar_color {
-        if color.len() != 7 {
-            return Err(AppError::BadRequest(
-                "The field AvatarColor must be a HTML/Hex color code with a length of 7 characters"
-                    .to_string(),
-            ));
-        }
-    }
-
-    let db = db::get_db(&env)?;
-    let now = crate::utils::time_now();
-
-    db.prepare("UPDATE users SET avatar_color = ?1, updated_at = ?2 WHERE id = ?3")
-        .bind(&[
-            to_js_val(payload.avatar_color.clone()),
-            now.into(),
-            claims.sub.clone().into(),
-        ])?
-        .run()
-        .await
-        .map_err(|_| AppError::Database)?;
-
-    let two_factor_enabled = two_factor::is_authenticator_enabled(&db, &claims.sub).await?
-        || webauthn::is_webauthn_enabled(&db, &claims.sub).await?;
-    let user: User = query!(&db, "SELECT * FROM users WHERE id = ?1", claims.sub)
-        .map_err(|_| AppError::Database)?
-        .first(None)
-        .await?
-        .ok_or(AppError::NotFound("User not found".to_string()))?;
-
-    Ok(Json(json!({
-        "id": user.id,
-        "name": user.name,
-        "email": user.email,
-        "emailVerified": user.email_verified,
-        "premium": true,
-        "premiumFromOrganization": false,
-        "masterPasswordHint": user.master_password_hint,
-        "culture": "en-US",
-        "twoFactorEnabled": two_factor_enabled,
-        "key": user.key,
-        "privateKey": user.private_key,
-        "securityStamp": user.security_stamp,
-        "avatarColor": user.avatar_color,
-        "organizations": [],
-        "object": "profile"
-    })))
 }
 
 #[worker::send]

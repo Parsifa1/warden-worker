@@ -3,7 +3,6 @@ pub mod ciphers;
 pub mod config;
 pub mod devices;
 pub mod folders;
-pub mod icons;
 pub mod identity;
 pub mod import;
 pub mod sends;
