@@ -411,26 +411,27 @@ pub async fn register(
     }
     let db = db::get_db(&env)?;
     let normalized_email = payload.email.trim().to_lowercase();
-    let user_count: Option<i64> = db
-        .prepare("SELECT COUNT(1) AS user_count FROM users")
-        .first(Some("user_count"))
+    let allowed_emails = env
+        .secret("ALLOWED_EMAILS")
+        .ok()
+        .and_then(|secret| secret.as_ref().as_string())
+        .unwrap_or_default();
+    if !allowed_emails.trim().is_empty()
+        && allowed_emails
+            .split(",")
+            .map(|email| email.trim().to_lowercase())
+            .all(|email| email != normalized_email)
+    {
+        return Err(AppError::Unauthorized("Not allowed to signup".to_string()));
+    }
+    let existing: Option<i64> = db
+        .prepare("SELECT COUNT(1) AS c FROM users WHERE email = ?1")
+        .bind(&[normalized_email.clone().into()])?
+        .first(Some("c"))
         .await
         .map_err(|_| AppError::Database)?;
-    let user_count = user_count.unwrap_or(0);
-    if user_count == 0 {
-        let allowed_emails = env
-            .secret("ALLOWED_EMAILS")
-            .ok()
-            .and_then(|secret| secret.as_ref().as_string())
-            .unwrap_or_default();
-        if !allowed_emails.trim().is_empty()
-            && allowed_emails
-                .split(",")
-                .map(|email| email.trim().to_lowercase())
-                .all(|email| email != normalized_email)
-        {
-            return Err(AppError::Unauthorized("Not allowed to signup".to_string()));
-        }
+    if existing.unwrap_or(0) > 0 {
+        return Err(AppError::BadRequest("Email already registered".to_string()));
     }
     let now = crate::utils::time_now();
     validate_kdf(
