@@ -59,6 +59,14 @@ CREATE TABLE IF NOT EXISTS ciphers (
     FOREIGN KEY (folder_id) REFERENCES folders(id) ON DELETE SET NULL
 );
 
+CREATE TABLE IF NOT EXISTS collection_ciphers (
+    collection_id TEXT NOT NULL,
+    cipher_id TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (collection_id, cipher_id),
+    FOREIGN KEY (cipher_id) REFERENCES ciphers(id) ON DELETE CASCADE
+);
+
 CREATE TABLE IF NOT EXISTS sends (
     id TEXT PRIMARY KEY NOT NULL,
     user_id TEXT NOT NULL,
