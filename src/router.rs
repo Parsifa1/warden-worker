@@ -23,7 +23,12 @@ pub fn api_router(env: Env) -> Router {
         .route("/icons/{*path}", get(icons::get_icon))
         // Identity/Auth routes
         .route("/identity/accounts/prelogin", post(accounts::prelogin))
+        .route(
+            "/identity/accounts/prelogin/password",
+            post(accounts::prelogin),
+        )
         .route("/api/accounts/prelogin", post(accounts::prelogin))
+        .route("/api/accounts/prelogin/password", post(accounts::prelogin))
         .route(
             "/identity/accounts/register/finish",
             post(accounts::register),
@@ -113,9 +118,9 @@ pub fn api_router(env: Env) -> Router {
         )
         .route(
             "/api/accounts/password",
-            put(accounts::change_master_password),
+            post(accounts::change_master_password),
         )
-        .route("/api/accounts/email", put(accounts::change_email))
+        .route("/api/accounts/email", post(accounts::change_email))
         .route("/api/two-factor", get(two_factor::two_factor_status))
         .route(
             "/api/two-factor/get-authenticator",
@@ -175,7 +180,9 @@ pub fn api_router(env: Env) -> Router {
         .route("/api/sends/access/{access_id}", post(sends::post_access))
         .route(
             "/api/sends/{send_id}",
-            get(sends::get_send).delete(sends::delete_send),
+            get(sends::get_send)
+                .put(sends::put_send)
+                .delete(sends::delete_send),
         )
         .route(
             "/api/sends/{send_id}/access/file/{file_id}",
