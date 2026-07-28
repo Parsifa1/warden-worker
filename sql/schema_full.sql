@@ -134,6 +134,7 @@ CREATE TABLE IF NOT EXISTS two_factor_webauthn (
     encrypted_public_key TEXT,
     encrypted_user_key TEXT,
     encrypted_private_key TEXT,
+    credential_use TEXT NOT NULL DEFAULT 'both',
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     PRIMARY KEY (user_id, slot_id),
@@ -151,6 +152,19 @@ CREATE TABLE IF NOT EXISTS webauthn_challenges (
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS two_factor_webauthn_settings (
+    user_id TEXT PRIMARY KEY NOT NULL,
+    enabled INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS used_passwordless_challenges (
+    challenge TEXT PRIMARY KEY NOT NULL,
+    used_at TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS devices (
