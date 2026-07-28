@@ -196,6 +196,16 @@ pub async fn ensure_webauthn_tables(db: &D1Database) -> Result<(), AppError> {
     .await
     .map_err(|_| AppError::Database)?;
 
+    db.prepare(
+        "CREATE TABLE IF NOT EXISTS used_passwordless_challenges (
+            challenge TEXT PRIMARY KEY NOT NULL,
+            used_at TEXT NOT NULL
+        )",
+    )
+    .run()
+    .await
+    .map_err(|_| AppError::Database)?;
+
     // Production schema self-healing: old deployments may already have these tables
     // with missing columns. SQLite/D1 has no IF NOT EXISTS for ADD COLUMN, so ignore
     // duplicate-column errors and only fail on unexpected issues.
@@ -809,7 +819,7 @@ pub async fn issue_passwordless_assertion_options(
             "timeout": 60000,
             "rpId": rp_id,
             "allowCredentials": allow_credentials,
-            "userVerification": "preferred"
+            "userVerification": "required"
         },
         "token": token
     }))
@@ -1021,6 +1031,21 @@ pub async fn verify_passwordless_login_assertion(
             app_error_message(e)
         ))
     })?;
+    let now_str = crate::utils::time_now();
+    let inserted: Option<i64> = db
+        .prepare(
+            "INSERT INTO used_passwordless_challenges (challenge, used_at) VALUES (?1, ?2)
+             ON CONFLICT(challenge) DO NOTHING",
+        )
+        .bind(&[claims.challenge.clone().into(), now_str.into()])?
+        .first(Some("changes"))
+        .await
+        .map_err(|_| AppError::Database)?;
+    if !matches!(inserted, Some(1)) {
+        return Err(AppError::Unauthorized(
+            "WebAuthn challenge already consumed".to_string(),
+        ));
+    }
     verify_origin(&claims.origin, &client_data.origin).map_err(|e| {
         AppError::Unauthorized(format!(
             "WebAuthn origin verification failed: {}",
@@ -1035,6 +1060,11 @@ pub async fn verify_passwordless_login_assertion(
             app_error_message(e)
         ))
     })?;
+    if (parsed.flags & 0x04) == 0 {
+        return Err(AppError::Unauthorized(
+            "User verification is required for passwordless login".to_string(),
+        ));
+    }
     verify_rp_id_hash(&claims.rp_id, &parsed.rp_id_hash).map_err(|e| {
         AppError::Unauthorized(format!(
             "WebAuthn rpId verification failed: {}",
