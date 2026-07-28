@@ -131,7 +131,9 @@ async fn webauthn_response(
         .collect();
     Ok(json!({
         "Enabled": enabled,
-        "Keys": key_items
+        "Keys": key_items,
+        "Object": "webAuthnKey",
+        "object": "webAuthnKey"
     }))
 }
 
@@ -153,6 +155,8 @@ async fn webauthn_credentials_response(
             json!({
                 "Id": k.id,
                 "id": k.id,
+                "Object": "webAuthnKey",
+                "object": "webAuthnKey",
                 "Name": k.name,
                 "name": k.name,
                 "PrfStatus": k.prf_status,

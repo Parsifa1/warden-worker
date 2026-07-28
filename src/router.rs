@@ -1,7 +1,7 @@
 use axum::extract::DefaultBodyLimit;
 use axum::{
     response::Html,
-    routing::{delete, get, post, put},
+    routing::{get, post, put},
     Router,
 };
 use std::sync::Arc;
@@ -219,9 +219,16 @@ pub fn api_router(env: Env) -> Router {
         )
         .route("/api/ciphers/restore", put(ciphers::restore_ciphers))
         // Folders CRUD
-        .route("/api/folders", post(folders::create_folder))
-        .route("/api/folders/{id}", put(folders::update_folder))
-        .route("/api/folders/{id}", delete(folders::delete_folder))
+        .route(
+            "/api/folders",
+            get(folders::get_folders).post(folders::create_folder),
+        )
+        .route(
+            "/api/folders/{id}",
+            get(folders::get_folder)
+                .put(folders::update_folder)
+                .delete(folders::delete_folder),
+        )
         .route("/api/config", get(config::config))
         .route("/api/alive", get(config::alive))
         .route("/api/now", get(config::now))

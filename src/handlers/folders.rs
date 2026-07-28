@@ -11,6 +11,50 @@ use crate::models::folder::{CreateFolderRequest, Folder, FolderResponse};
 use axum::extract::Path;
 
 #[worker::send]
+pub async fn get_folders(
+    claims: Claims,
+    State(env): State<Arc<Env>>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    let db = db::get_db(&env)?;
+    let rows: Vec<Folder> = query!(
+        &db,
+        "SELECT * FROM folders WHERE user_id = ?1 ORDER BY updated_at DESC",
+        claims.sub
+    )
+    .map_err(|_| AppError::Database)?
+    .all()
+    .await?
+    .results()?;
+
+    let data: Vec<FolderResponse> = rows.into_iter().map(|f| f.into()).collect();
+    Ok(Json(serde_json::json!({
+        "data": data,
+        "object": "list",
+        "continuationToken": null
+    })))
+}
+
+#[worker::send]
+pub async fn get_folder(
+    claims: Claims,
+    State(env): State<Arc<Env>>,
+    Path(id): Path<String>,
+) -> Result<Json<FolderResponse>, AppError> {
+    let db = db::get_db(&env)?;
+    let row: Option<Folder> = query!(
+        &db,
+        "SELECT * FROM folders WHERE id = ?1 AND user_id = ?2",
+        id,
+        claims.sub
+    )
+    .map_err(|_| AppError::Database)?
+    .first(None)
+    .await?;
+    let row = row.ok_or(AppError::NotFound("Folder not found".to_string()))?;
+    Ok(Json(row.into()))
+}
+
+#[worker::send]
 pub async fn create_folder(
     claims: Claims,
     State(env): State<Arc<Env>>,
