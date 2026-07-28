@@ -75,6 +75,9 @@ pub struct RegisterRequest {
     pub kdf_memory: Option<i32>,
     #[serde(default)]
     pub kdf_parallelism: Option<i32>,
+    #[serde(default)]
+    #[allow(dead_code)]
+    pub email_verification_token: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]

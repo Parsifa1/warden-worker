@@ -214,8 +214,22 @@ pub async fn post_security_stamp(
 }
 
 #[worker::send]
-pub async fn revision_date(_claims: Claims) -> Result<Json<i64>, AppError> {
-    Ok(Json(chrono::Utc::now().timestamp_millis()))
+pub async fn revision_date(
+    claims: Claims,
+    State(env): State<Arc<Env>>,
+) -> Result<Json<i64>, AppError> {
+    let db = db::get_db(&env)?;
+    let updated_at: Option<String> = db
+        .prepare("SELECT updated_at FROM users WHERE id = ?1")
+        .bind(&[claims.sub.into()])?
+        .first(Some("updated_at"))
+        .await
+        .map_err(|_| AppError::Database)?;
+    let ts = updated_at
+        .and_then(|s| chrono::DateTime::parse_from_rfc3339(&s).ok())
+        .map(|dt| dt.timestamp_millis())
+        .unwrap_or_else(|| chrono::Utc::now().timestamp_millis());
+    Ok(Json(ts))
 }
 
 #[worker::send]
@@ -795,5 +809,8 @@ pub async fn verify_password(
         return Err(AppError::Unauthorized("Invalid credentials".to_string()));
     }
 
-    Ok(Json(Value::Null))
+    Ok(Json(json!({
+        "object": "masterPasswordPolicy",
+        "enforceOnLogin": false
+    })))
 }
