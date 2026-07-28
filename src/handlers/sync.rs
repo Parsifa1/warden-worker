@@ -77,15 +77,20 @@ pub async fn get_sync_data(
 
     let ciphers = ciphers
         .into_iter()
-        .filter_map(
-            |cipher| match serde_json::from_value::<CipherDBModel>(cipher.clone()) {
+        .filter_map(|cipher| {
+            let id = cipher
+                .get("id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("?")
+                .to_string();
+            match serde_json::from_value::<CipherDBModel>(cipher) {
                 Ok(cipher) => Some(cipher),
                 Err(err) => {
-                    log::warn!("Cannot parse {err:?} {cipher:?}");
+                    log::warn!("Cannot parse cipher {id}: {err}");
                     None
                 }
-            },
-        )
+            }
+        })
         .map(|cipher| cipher.into())
         .collect::<Vec<Cipher>>();
 
