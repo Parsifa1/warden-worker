@@ -11,6 +11,11 @@ use worker::D1Database;
 use crate::error::AppError;
 
 pub const TWO_FACTOR_PROVIDER_AUTHENTICATOR: i32 = 0;
+pub async fn is_two_factor_enabled(db: &D1Database, user_id: &str) -> Result<bool, AppError> {
+    let authenticator = is_authenticator_enabled(db, user_id).await?;
+    let webauthn = crate::core::webauthn::is_webauthn_enabled(db, user_id).await?;
+    Ok(authenticator || webauthn)
+}
 
 pub fn generate_totp_secret_base32_20() -> String {
     let mut bytes = [0u8; 20];

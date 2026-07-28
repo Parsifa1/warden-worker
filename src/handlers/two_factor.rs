@@ -111,16 +111,25 @@ pub async fn two_factor_status(
     let authenticator_enabled = two_factor::is_authenticator_enabled(&db, &claims.sub).await?;
     let webauthn_enabled = webauthn::is_webauthn_enabled(&db, &claims.sub).await?;
     let enabled = authenticator_enabled || webauthn_enabled;
-    let mut providers: Vec<i32> = Vec::new();
+    let mut providers: Vec<serde_json::Value> = Vec::new();
     if authenticator_enabled {
-        providers.push(two_factor::TWO_FACTOR_PROVIDER_AUTHENTICATOR);
+        providers.push(json!({
+            "enabled": true,
+            "type": two_factor::TWO_FACTOR_PROVIDER_AUTHENTICATOR,
+            "object": "twoFactorProvider"
+        }));
     }
     if webauthn_enabled {
-        providers.push(webauthn::TWO_FACTOR_PROVIDER_WEBAUTHN);
+        providers.push(json!({
+            "enabled": true,
+            "type": webauthn::TWO_FACTOR_PROVIDER_WEBAUTHN,
+            "object": "twoFactorProvider"
+        }));
     }
     Ok(Json(json!({
-        "enabled": enabled,
-        "providers": providers
+        "object": "list",
+        "data": providers,
+        "enabled": enabled
     })))
 }
 
