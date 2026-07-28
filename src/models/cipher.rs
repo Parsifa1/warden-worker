@@ -218,10 +218,16 @@ impl Serialize for Cipher {
             "organizationUseTotp".to_string(),
             json!(self.organization_use_totp),
         );
-        response_map.insert("collectionIds".to_string(), json!(self.collection_ids));
+        response_map.insert(
+            "collectionIds".to_string(),
+            json!(self.collection_ids.clone().unwrap_or_default()),
+        );
         response_map.insert("revisionDate".to_string(), json!(self.updated_at));
         response_map.insert("creationDate".to_string(), json!(self.created_at));
         response_map.insert("deletedDate".to_string(), json!(self.deleted_at));
+        response_map.insert("attachments".to_string(), json!([]));
+        response_map.insert("key".to_string(), Value::Null);
+        response_map.insert("archivedDate".to_string(), Value::Null);
 
         if let Some(data_obj) = self.data.as_object() {
             let data_clone = data_obj.clone();
@@ -257,12 +263,17 @@ impl Serialize for Cipher {
             let mut secure_note = Value::Null;
             let mut card = Value::Null;
             let mut identity = Value::Null;
-
             match self.r#type {
                 1 => login = data_clone.get("login").cloned().unwrap_or(Value::Null),
                 2 => secure_note = data_clone.get("secureNote").cloned().unwrap_or(Value::Null),
                 3 => card = data_clone.get("card").cloned().unwrap_or(Value::Null),
                 4 => identity = data_clone.get("identity").cloned().unwrap_or(Value::Null),
+                5 => {
+                    response_map.insert(
+                        "sshKey".to_string(),
+                        data_clone.get("sshKey").cloned().unwrap_or(Value::Null),
+                    );
+                }
                 _ => {}
             }
 
@@ -280,6 +291,7 @@ impl Serialize for Cipher {
             response_map.insert("secureNote".to_string(), Value::Null);
             response_map.insert("card".to_string(), Value::Null);
             response_map.insert("identity".to_string(), Value::Null);
+            response_map.insert("sshKey".to_string(), Value::Null);
         }
 
         Value::Object(response_map).serialize(serializer)
@@ -371,9 +383,11 @@ pub struct CipherRequestData {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub password_history: Option<Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub reprompt: Option<i32>,
+    pub encrypted_for: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_known_revision_date: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reprompt: Option<i32>,
 }
 
 // Represents the full request payload for creating a cipher.
