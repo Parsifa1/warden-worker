@@ -1,4 +1,8 @@
-use axum::{extract::State, Json};
+use axum::{
+    extract::{Query, State},
+    Json,
+};
+use serde::Deserialize;
 use serde_json::{json, Value};
 use std::sync::Arc;
 use worker::Env;
@@ -17,13 +21,21 @@ use crate::{
     two_factor,
 };
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SyncQuery {
+    pub last_sync_date: Option<String>,
+}
+
 #[worker::send]
 pub async fn get_sync_data(
     claims: Claims,
     State(env): State<Arc<Env>>,
+    Query(q): Query<SyncQuery>,
 ) -> Result<Json<Value>, AppError> {
     let user_id = claims.sub;
     let db = db::get_db(&env)?;
+    let since = q.last_sync_date.as_deref();
 
     // Fetch profile
     let user: User = db
@@ -33,23 +45,35 @@ pub async fn get_sync_data(
         .await?
         .ok_or_else(|| AppError::NotFound("User not found".to_string()))?;
 
-    // Fetch folders
-    let folders_db: Vec<Folder> = db
-        .prepare("SELECT * FROM folders WHERE user_id = ?1")
-        .bind(&[user_id.clone().into()])?
-        .all()
-        .await?
-        .results()?;
+    let folders_db: Vec<Folder> = if let Some(since) = since {
+        db.prepare("SELECT * FROM folders WHERE user_id = ?1 AND updated_at > ?2")
+            .bind(&[user_id.clone().into(), since.into()])?
+            .all()
+            .await?
+            .results()?
+    } else {
+        db.prepare("SELECT * FROM folders WHERE user_id = ?1")
+            .bind(&[user_id.clone().into()])?
+            .all()
+            .await?
+            .results()?
+    };
 
     let folders: Vec<FolderResponse> = folders_db.into_iter().map(|f| f.into()).collect();
 
-    // Fetch ciphers
-    let ciphers: Vec<Value> = db
-        .prepare("SELECT * FROM ciphers WHERE user_id = ?1")
-        .bind(&[user_id.clone().into()])?
-        .all()
-        .await?
-        .results()?;
+    let ciphers: Vec<Value> = if let Some(since) = since {
+        db.prepare("SELECT * FROM ciphers WHERE user_id = ?1 AND updated_at > ?2")
+            .bind(&[user_id.clone().into(), since.into()])?
+            .all()
+            .await?
+            .results()?
+    } else {
+        db.prepare("SELECT * FROM ciphers WHERE user_id = ?1")
+            .bind(&[user_id.clone().into()])?
+            .all()
+            .await?
+            .results()?
+    };
 
     let ciphers = ciphers
         .into_iter()
@@ -65,12 +89,21 @@ pub async fn get_sync_data(
         .map(|cipher| cipher.into())
         .collect::<Vec<Cipher>>();
 
-    let send_rows: Vec<Value> = db
-        .prepare("SELECT * FROM sends WHERE user_id = ?1 ORDER BY updated_at DESC")
-        .bind(&[user_id.clone().into()])?
+    let send_rows: Vec<Value> = if let Some(since) = since {
+        db.prepare(
+            "SELECT * FROM sends WHERE user_id = ?1 AND updated_at > ?2 ORDER BY updated_at DESC",
+        )
+        .bind(&[user_id.clone().into(), since.into()])?
         .all()
         .await?
-        .results()?;
+        .results()?
+    } else {
+        db.prepare("SELECT * FROM sends WHERE user_id = ?1 ORDER BY updated_at DESC")
+            .bind(&[user_id.clone().into()])?
+            .all()
+            .await?
+            .results()?
+    };
     let sends = send_rows
         .into_iter()
         .filter_map(|v| serde_json::from_value::<SendDBModel>(v).ok())
