@@ -169,6 +169,68 @@ pub async fn profile(claims: Claims, State(env): State<Arc<Env>>) -> Result<Json
     })))
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateProfileRequest {
+    pub name: Option<String>,
+}
+
+#[worker::send]
+pub async fn update_profile(
+    claims: Claims,
+    State(env): State<Arc<Env>>,
+    Json(payload): Json<UpdateProfileRequest>,
+) -> Result<Json<Value>, AppError> {
+    let db = db::get_db(&env)?;
+    let now = crate::utils::time_now();
+    if let Some(name) = &payload.name {
+        if name.len() > 50 {
+            return Err(AppError::BadRequest(
+                "Name must be 50 characters or fewer".to_string(),
+            ));
+        }
+        db.prepare("UPDATE users SET name = ?1, updated_at = ?2 WHERE id = ?3")
+            .bind(&[name.into(), now.into(), claims.sub.clone().into()])?
+            .run()
+            .await
+            .map_err(|_| AppError::Database)?;
+    }
+    profile(claims, State(env)).await
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateAvatarRequest {
+    pub avatar_color: Option<String>,
+}
+
+#[worker::send]
+pub async fn update_avatar(
+    claims: Claims,
+    State(env): State<Arc<Env>>,
+    Json(payload): Json<UpdateAvatarRequest>,
+) -> Result<Json<Value>, AppError> {
+    let db = db::get_db(&env)?;
+    let now = crate::utils::time_now();
+    if let Some(color) = &payload.avatar_color {
+        if color.len() != 7 {
+            return Err(AppError::BadRequest(
+                "AvatarColor must be a 7-character hex color".to_string(),
+            ));
+        }
+    }
+    db.prepare("UPDATE users SET avatar_color = ?1, updated_at = ?2 WHERE id = ?3")
+        .bind(&[
+            payload.avatar_color.clone().into(),
+            now.into(),
+            claims.sub.clone().into(),
+        ])?
+        .run()
+        .await
+        .map_err(|_| AppError::Database)?;
+    profile(claims, State(env)).await
+}
+
 #[worker::send]
 pub async fn post_security_stamp(
     claims: Claims,
@@ -457,7 +519,15 @@ pub async fn register(
 
     let user = User {
         id: Uuid::new_v4().to_string(),
-        name: payload.name,
+        name: payload.name.or_else(|| {
+            Some(
+                normalized_email
+                    .split('@')
+                    .next()
+                    .unwrap_or(&normalized_email)
+                    .to_string(),
+            )
+        }),
         email: normalized_email,
         email_verified: false,
         master_password_hash: payload.master_password_hash,
