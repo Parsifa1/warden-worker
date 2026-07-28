@@ -200,8 +200,15 @@ pub fn api_router(env: Env) -> Router {
         .route("/api/ciphers/import", post(import::import_data))
         .route(
             "/api/ciphers/{id}",
-            put(ciphers::update_cipher).delete(ciphers::hard_delete_cipher),
+            get(ciphers::get_cipher)
+                .put(ciphers::update_cipher)
+                .delete(ciphers::hard_delete_cipher),
         )
+        .route(
+            "/api/ciphers/{id}/partial",
+            put(ciphers::partial_update_cipher),
+        )
+        .route("/api/ciphers/purge", post(ciphers::purge_ciphers))
         .route(
             "/api/ciphers/{id}/delete",
             put(ciphers::soft_delete_cipher).post(ciphers::hard_delete_cipher_post),
