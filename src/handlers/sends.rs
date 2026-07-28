@@ -354,6 +354,80 @@ pub async fn post_send(
 }
 
 #[worker::send]
+pub async fn put_send(
+    claims: Claims,
+    State(env): State<Arc<Env>>,
+    Path(send_id): Path<String>,
+    Json(payload): Json<SendData>,
+) -> Result<Json<Value>, AppError> {
+    let db = db::get_db(&env)?;
+
+    let existing = get_send_by_id_and_user(&db, &send_id, &claims.sub)
+        .await?
+        .ok_or_else(|| AppError::NotFound("Send not found".to_string()))?;
+
+    if existing.r#type != payload.r#type {
+        return Err(AppError::BadRequest(
+            "Send type cannot be changed".to_string(),
+        ));
+    }
+    if payload.r#type == SEND_TYPE_FILE {
+        return Err(AppError::BadRequest(
+            "File sends should be edited via /api/sends/file/v2".to_string(),
+        ));
+    }
+
+    let name = payload.name.clone();
+    let notes = payload.notes.clone();
+    let password = payload.password.clone();
+    let max_access_count = payload.max_access_count;
+    let expiration_date = payload.expiration_date.clone();
+    let deletion_date = payload.deletion_date.clone();
+    let disabled = payload.disabled;
+    let hide_email = payload.hide_email;
+
+    let (_, key, data_value) = extract_send_payload_data(payload)?;
+    let data_str = serde_json::to_string(&data_value).map_err(|_| AppError::Internal)?;
+
+    let (password_salt, password_hash) = match password.as_deref() {
+        Some(p) if !p.trim().is_empty() => {
+            let salt = new_salt_b64();
+            let hash = hash_password(p, &salt)?;
+            (Some(salt), Some(hash))
+        }
+        _ => (None, None),
+    };
+    let now = now_rfc3339_millis();
+
+    query!(
+        &db,
+        "UPDATE sends SET name = ?1, notes = ?2, data = ?3, key = ?4, password_hash = ?5, password_salt = ?6, max_access_count = ?7, expiration_date = ?8, deletion_date = ?9, disabled = ?10, hide_email = ?11, updated_at = ?12 WHERE id = ?13 AND user_id = ?14",
+        name,
+        notes,
+        data_str,
+        key,
+        password_hash,
+        password_salt,
+        max_access_count,
+        expiration_date,
+        deletion_date,
+        if disabled { 1 } else { 0 },
+        hide_email.map(|b| if b { 1 } else { 0 }),
+        now,
+        send_id,
+        claims.sub
+    )
+    .map_err(|_| AppError::Database)?
+    .run()
+    .await?;
+
+    let send = get_send_by_id_and_user(&db, &send_id, &claims.sub)
+        .await?
+        .ok_or_else(|| AppError::Internal)?;
+    Ok(Json(send_to_json(&send)))
+}
+
+#[worker::send]
 pub async fn post_send_file_v2(
     claims: Claims,
     State(env): State<Arc<Env>>,
