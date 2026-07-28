@@ -66,12 +66,12 @@ fn hash_password(password: &str, salt_b64: &str) -> Result<String, AppError> {
     Ok(general_purpose::STANDARD.encode(out))
 }
 
-fn new_salt_b64() -> String {
+fn new_salt_b64() -> Result<String, AppError> {
     let mut bytes = [0u8; 16];
     SysRng
         .try_fill_bytes(&mut bytes)
-        .expect("Failed to generate salt");
-    general_purpose::STANDARD.encode(bytes)
+        .map_err(|_| AppError::Internal)?;
+    Ok(general_purpose::STANDARD.encode(bytes))
 }
 
 fn extract_send_payload_data(mut data: SendData) -> Result<(i32, String, Value), AppError> {
@@ -125,14 +125,24 @@ async fn get_send_by_id_and_user(
 async fn update_send_access_count(
     db: &worker::D1Database,
     send_id: &str,
-    delta: i32,
-) -> Result<(), AppError> {
-    db.prepare("UPDATE sends SET access_count = access_count + ?1, updated_at = ?2 WHERE id = ?3")
-        .bind(&[delta.into(), now_rfc3339_millis().into(), send_id.into()])?
-        .run()
-        .await
-        .map_err(|_| AppError::Database)?;
-    Ok(())
+) -> Result<bool, AppError> {
+    let result = query!(
+        db,
+        "UPDATE sends SET access_count = access_count + 1, updated_at = ?1
+         WHERE id = ?2 AND (max_access_count IS NULL OR access_count < max_access_count)",
+        now_rfc3339_millis(),
+        send_id,
+    )
+    .map_err(|_| AppError::Database)?
+    .run()
+    .await?;
+    let changes = result
+        .meta()
+        .ok()
+        .flatten()
+        .and_then(|m| m.changes)
+        .unwrap_or(0);
+    Ok(changes > 0)
 }
 
 async fn get_creator_identifier(
@@ -241,9 +251,8 @@ pub async fn delete_send(
     claims: Claims,
     State(env): State<Arc<Env>>,
     Path(send_id): Path<String>,
-) -> Result<Json<Value>, AppError> {
+) -> Result<(StatusCode, ()), AppError> {
     let db = db::get_db(&env)?;
-
     let owned = get_send_by_id_and_user(&db, &send_id, &claims.sub)
         .await?
         .ok_or_else(|| AppError::NotFound("Send not found".to_string()))?;
@@ -280,7 +289,7 @@ pub async fn delete_send(
     .run()
     .await?;
 
-    Ok(Json(json!({})))
+    Ok((StatusCode::NO_CONTENT, ()))
 }
 
 #[worker::send]
@@ -314,7 +323,8 @@ pub async fn post_send(
     let password_salt = password
         .as_deref()
         .filter(|p| !p.trim().is_empty())
-        .map(|_| new_salt_b64());
+        .map(|_| new_salt_b64())
+        .transpose()?;
     let password_hash = match (password.as_deref(), password_salt.as_deref()) {
         (Some(p), Some(salt)) if !p.trim().is_empty() => Some(hash_password(p, salt)?),
         _ => None,
@@ -391,7 +401,7 @@ pub async fn put_send(
 
     let (password_salt, password_hash) = match password.as_deref() {
         Some(p) if !p.trim().is_empty() => {
-            let salt = new_salt_b64();
+            let salt = new_salt_b64()?;
             let hash = hash_password(p, &salt)?;
             (Some(salt), Some(hash))
         }
@@ -755,8 +765,10 @@ pub async fn post_access(
     validate_send_access(&send)?;
     validate_send_password(&send, payload.password)?;
 
-    if send.r#type == SEND_TYPE_TEXT {
-        update_send_access_count(&db, &send.id, 1).await?;
+    if send.r#type == SEND_TYPE_TEXT
+        && !update_send_access_count(&db, &send.id).await?
+    {
+        return Err(AppError::NotFound("Send access limit reached".to_string()));
     }
 
     let creator_identifier = get_creator_identifier(&db, &send).await?;
@@ -786,8 +798,9 @@ pub async fn post_access_file(
     if file_exists.is_none() {
         return Err(AppError::NotFound("Send not found".to_string()));
     }
-
-    update_send_access_count(&db, &send.id, 1).await?;
+    if !update_send_access_count(&db, &send.id).await? {
+        return Err(AppError::NotFound("Send access limit reached".to_string()));
+    }
 
     let token = generate_download_token(&env, &send_id, &file_id)?;
     let url = format!("/api/sends/{send_id}/{file_id}?t={token}");

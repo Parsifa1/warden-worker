@@ -178,12 +178,12 @@ fn sha256_hex(input: &str) -> String {
     hex::encode(hasher.finalize())
 }
 
-fn generate_remember_token() -> String {
+fn generate_remember_token() -> Result<String, AppError> {
     let mut bytes = [0u8; 32];
     SysRng
         .try_fill_bytes(&mut bytes)
-        .expect("failed to generate random bytes");
-    general_purpose::URL_SAFE_NO_PAD.encode(bytes)
+        .map_err(|_| AppError::Internal)?;
+    Ok(general_purpose::URL_SAFE_NO_PAD.encode(bytes))
 }
 
 fn get_cookie(headers: &HeaderMap, name: &str) -> Option<String> {
@@ -326,13 +326,19 @@ pub async fn token(
             // This limits login attempts per email address, not per IP
             if let Ok(rate_limiter) = env.rate_limiter("LOGIN_RATE_LIMITER") {
                 let rate_limit_key = format!("login:{}", username.to_lowercase());
-                if let Ok(outcome) = rate_limiter.limit(rate_limit_key).await {
-                    if !outcome.success {
+                match rate_limiter.limit(rate_limit_key).await {
+                    Ok(outcome) if !outcome.success => {
                         return Err(AppError::TooManyRequests(
                             "Too many login attempts. Please try again later.".to_string(),
                         ));
                     }
+                    Ok(_) => {}
+                    Err(e) => {
+                        log::warn!("Rate limiter error, failing open: {e:?}");
+                    }
                 }
+            } else {
+                log::warn!("LOGIN_RATE_LIMITER binding missing, failing open");
             }
             let user: Value = db
                 .prepare("SELECT * FROM users WHERE email = ?1")
@@ -598,7 +604,7 @@ pub async fn token(
                 }
 
                 if remember_device_requested && payload.device_identifier.is_some() {
-                    remember_token_to_return = Some(generate_remember_token());
+                    remember_token_to_return = Some(generate_remember_token()?);
                 }
             }
 

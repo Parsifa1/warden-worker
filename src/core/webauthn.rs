@@ -549,7 +549,7 @@ pub async fn issue_registration_challenge(
     credential_use: &str,
 ) -> Result<Value, AppError> {
     ensure_webauthn_tables(db).await?;
-    let challenge = random_challenge_b64url();
+    let challenge = random_challenge_b64url()?;
     upsert_pending_challenge(
         db,
         user_id,
@@ -618,7 +618,7 @@ pub async fn issue_login_challenge(
         return Ok(None);
     }
 
-    let challenge = random_challenge_b64url();
+    let challenge = random_challenge_b64url()?;
     upsert_pending_challenge(db, user_id, CHALLENGE_KIND_LOGIN, &challenge, rp_id, origin).await?;
 
     let allow_credentials = existing
@@ -649,7 +649,7 @@ pub async fn issue_passwordless_assertion_options(
     ensure_webauthn_tables(db).await?;
     let allow_credentials: Vec<Value> = Vec::new();
 
-    let challenge = random_challenge_b64url();
+    let challenge = random_challenge_b64url()?;
     let now = Utc::now().timestamp() as usize;
     let claims = WebAuthnLoginTokenClaims {
         exp: now + CHALLENGE_TTL_SECONDS as usize,
@@ -1003,12 +1003,12 @@ pub fn extract_assertion_credential_id_b64url(
     Ok(encode_b64url(&credential_id_raw))
 }
 
-fn random_challenge_b64url() -> String {
+fn random_challenge_b64url() -> Result<String, AppError> {
     let mut challenge = [0u8; 32];
     SysRng
         .try_fill_bytes(&mut challenge)
-        .expect("failed to generate random bytes");
-    encode_b64url(&challenge)
+        .map_err(|_| AppError::Internal)?;
+    Ok(encode_b64url(&challenge))
 }
 
 fn normalize_rp_id(host: &str) -> String {

@@ -17,12 +17,12 @@ pub async fn is_two_factor_enabled(db: &D1Database, user_id: &str) -> Result<boo
     Ok(authenticator || webauthn)
 }
 
-pub fn generate_totp_secret_base32_20() -> String {
+pub fn generate_totp_secret_base32_20() -> Result<String, AppError> {
     let mut bytes = [0u8; 20];
     SysRng
         .try_fill_bytes(&mut bytes)
-        .expect("failed to generate random bytes");
-    Secret::Raw(bytes.to_vec()).to_encoded().to_string()
+        .map_err(|_| AppError::Internal)?;
+    Ok(Secret::Raw(bytes.to_vec()).to_encoded().to_string())
 }
 
 pub async fn ensure_two_factor_authenticator_table(_db: &D1Database) -> Result<(), AppError> {
@@ -214,7 +214,7 @@ mod tests {
 
     #[test]
     fn generated_totp_secret_is_20_bytes() {
-        let secret = generate_totp_secret_base32_20();
+        let secret = generate_totp_secret_base32_20().expect("generate secret");
         let bytes = Secret::Encoded(secret).to_bytes().expect("decode base32");
         assert_eq!(bytes.len(), 20);
     }

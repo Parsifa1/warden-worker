@@ -149,7 +149,7 @@ pub async fn authenticator_request(
         .map_err(|_| AppError::Database)?;
     let user_email = user_email.ok_or_else(|| AppError::NotFound("User not found".to_string()))?;
 
-    let secret_encoded = two_factor::generate_totp_secret_base32_20();
+    let secret_encoded = two_factor::generate_totp_secret_base32_20()?;
     let two_factor_key_b64 = env.secret("TWO_FACTOR_ENC_KEY").ok().map(|s| s.to_string());
     let secret_enc = two_factor::encrypt_secret_with_optional_key(
         two_factor_key_b64.as_deref(),
@@ -209,7 +209,7 @@ pub async fn get_authenticator(
             &secret_enc,
         )?
     } else {
-        two_factor::generate_totp_secret_base32_20()
+        two_factor::generate_totp_secret_base32_20()?
     };
 
     Ok(Json(json!({
