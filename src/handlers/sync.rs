@@ -89,7 +89,7 @@ pub async fn get_sync_data(
         object: "profile".to_string(),
         premium: true,
         premium_from_organization: false,
-        email_verified: true,
+        email_verified: user.email_verified,
         force_password_reset: false,
         two_factor_enabled: two_factor::is_two_factor_enabled(&db, &user_id).await?,
         uses_key_connector: false,
