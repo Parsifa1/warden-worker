@@ -203,7 +203,7 @@ pub async fn get_sends(
 ) -> Result<Json<Value>, AppError> {
     let db = db::get_db(&env)?;
     let rows: Vec<Value> = db
-        .prepare("SELECT * FROM sends WHERE user_id = ?1 ORDER BY updated_at DESC")
+        .prepare("SELECT * FROM sends WHERE user_id = ?1 ORDER BY updated_at DESC LIMIT 500")
         .bind(&[claims.sub.into()])?
         .all()
         .await
@@ -448,6 +448,12 @@ pub async fn post_send_file_v2(
     if file_length < 0 {
         return Err(AppError::BadRequest(
             "Send size can't be negative".to_string(),
+        ));
+    }
+    const MAX_SEND_FILE_BYTES: i64 = 501 * 1024 * 1024;
+    if file_length > MAX_SEND_FILE_BYTES {
+        return Err(AppError::BadRequest(
+            "File size exceeds 501MB limit".to_string(),
         ));
     }
 
