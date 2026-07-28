@@ -183,7 +183,7 @@ impl From<CipherDBModel> for Cipher {
             deleted_at: val.deleted_at,
             created_at: val.created_at,
             updated_at: val.updated_at,
-            object: "default_object".to_string(),
+            object: "cipher".to_string(),
             organization_use_totp: false,
             edit: true,
             view_password: true,
