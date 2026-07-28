@@ -109,7 +109,7 @@ pub fn encrypt_secret_with_optional_key(
     secret_encoded: &str,
 ) -> Result<String, AppError> {
     let Some(key_b64) = two_factor_enc_key_b64 else {
-        return Ok(format!("plain:{}", secret_encoded));
+        return Err(AppError::Internal);
     };
 
     let key_bytes = general_purpose::STANDARD

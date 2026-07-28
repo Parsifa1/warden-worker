@@ -81,16 +81,8 @@ pub fn api_router(env: Env) -> Router {
             get(devices::get_auth_requests).post(devices::post_auth_request),
         )
         .route(
-            "/api/auth-requests/admin-request",
-            post(devices::post_auth_request),
-        )
-        .route(
             "/api/auth-requests/",
             get(devices::get_auth_requests).post(devices::post_auth_request),
-        )
-        .route(
-            "/api/auth-requests/admin-request/",
-            post(devices::post_auth_request),
         )
         .route(
             "/api/auth-requests/pending",
