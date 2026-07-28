@@ -11,9 +11,9 @@ use crate::jwt;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Claims {
-    pub sub: String, // User ID
-    pub exp: usize,  // Expiration time
-    pub nbf: usize,  // Not before time
+    pub sub: String,
+    pub exp: usize,
+    pub nbf: usize,
 
     pub premium: bool,
     pub name: String,
@@ -22,6 +22,8 @@ pub struct Claims {
     pub amr: Vec<String>,
     #[serde(default)]
     pub device: Option<String>,
+    #[serde(default)]
+    pub security_stamp: Option<String>,
 }
 
 impl FromRequestParts<Arc<Env>> for Claims {
@@ -31,7 +33,6 @@ impl FromRequestParts<Arc<Env>> for Claims {
         parts: &mut Parts,
         state: &Arc<Env>,
     ) -> Result<Self, Self::Rejection> {
-        // Extract the token from the authorization header
         let token = parts
             .headers
             .get(header::AUTHORIZATION)
@@ -44,7 +45,6 @@ impl FromRequestParts<Arc<Env>> for Claims {
             .ok_or_else(|| AppError::Unauthorized("Missing or invalid token".to_string()))?;
 
         let secret = state.secret("JWT_SECRET")?;
-
         jwt::decode_hs256(&token, &secret.to_string())
     }
 }

@@ -90,6 +90,7 @@ fn generate_tokens_and_response(
         email_verified: true,
         amr: vec!["Application".into()],
         device: None,
+        security_stamp: Some(user.security_stamp.clone()),
     };
 
     let jwt_secret = env.secret("JWT_SECRET")?.to_string();
@@ -107,6 +108,7 @@ fn generate_tokens_and_response(
         email_verified: true,
         amr: vec!["Application".into()],
         device: None,
+        security_stamp: Some(user.security_stamp.clone()),
     };
     let jwt_refresh_secret = env.secret("JWT_REFRESH_SECRET")?.to_string();
     let refresh_token = jwt::encode_hs256(&refresh_claims, &jwt_refresh_secret)?;
@@ -405,8 +407,68 @@ pub async fn token(
                 if !constant_time_eq(stored_hash.as_bytes(), candidate_hash.as_bytes()) {
                     return Err(AppError::Unauthorized("Invalid credentials".to_string()));
                 }
+                let now = crate::utils::time_now();
+                let consumed: Option<i64> = db
+                    .prepare(
+                        "UPDATE auth_requests SET authentication_date = ?1
+                         WHERE id = ?2 AND user_id = ?3 AND authentication_date IS NULL",
+                    )
+                    .bind(&[now.into(), auth_request_id.into(), user.id.clone().into()])?
+                    .first(Some("changes"))
+                    .await
+                    .map_err(|_| AppError::Database)?;
+                if !matches!(consumed, Some(1)) {
+                    return Err(AppError::Unauthorized(
+                        "Auth request already consumed".to_string(),
+                    ));
+                }
 
-                // Auth-request login bypasses 2FA and remember-device flow
+                let authenticator_enabled =
+                    two_factor::is_authenticator_enabled(&db, &user.id).await?;
+                let webauthn_enabled = webauthn::is_webauthn_enabled(&db, &user.id).await?;
+                if authenticator_enabled || webauthn_enabled {
+                    let provider = payload.two_factor_provider;
+                    let token = payload.two_factor_token.clone();
+                    let verified = match provider {
+                        Some(two_factor::TWO_FACTOR_PROVIDER_AUTHENTICATOR)
+                            if authenticator_enabled =>
+                        {
+                            let Some(token) = token.as_deref() else {
+                                return two_factor_required_response(&db, &user.id, &headers).await;
+                            };
+                            let secret_enc =
+                                two_factor::get_authenticator_secret_enc(&db, &user.id)
+                                    .await?
+                                    .ok_or_else(|| AppError::Internal)?;
+                            let two_factor_key_b64 =
+                                env.secret("TWO_FACTOR_ENC_KEY").ok().map(|s| s.to_string());
+                            let secret_encoded = two_factor::decrypt_secret_with_optional_key(
+                                two_factor_key_b64.as_deref(),
+                                &user.id,
+                                &secret_enc,
+                            )?;
+                            two_factor::verify_totp_code(&secret_encoded, token)?
+                        }
+                        Some(webauthn::TWO_FACTOR_PROVIDER_WEBAUTHN) if webauthn_enabled => {
+                            let Some(token) = token.as_deref() else {
+                                return two_factor_required_response(&db, &user.id, &headers).await;
+                            };
+                            webauthn::verify_login_assertion(
+                                &db,
+                                &user.id,
+                                token,
+                                webauthn::WEBAUTHN_USE_2FA,
+                            )
+                            .await
+                            .is_ok()
+                        }
+                        _ => false,
+                    };
+                    if !verified {
+                        return two_factor_required_response(&db, &user.id, &headers).await;
+                    }
+                }
+
                 let user_id = user.id.clone();
                 let device_identifier = payload.device_identifier.clone();
                 let device_name = payload.device_name.clone();
@@ -769,6 +831,12 @@ pub async fn token(
                 .map_err(|_| AppError::Unauthorized("Invalid user".to_string()))?
                 .ok_or_else(|| AppError::Unauthorized("Invalid user".to_string()))?;
             let user: User = serde_json::from_value(user).map_err(|_| AppError::Internal)?;
+
+            if let Some(stamp) = &token_data.security_stamp {
+                if !constant_time_eq(stamp.as_bytes(), user.security_stamp.as_bytes()) {
+                    return Err(AppError::Unauthorized("Session revoked".to_string()));
+                }
+            }
 
             let response = generate_tokens_and_response(user, &env, None)?;
             let mut resp = Json(response.clone()).into_response();
