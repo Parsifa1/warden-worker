@@ -44,6 +44,13 @@ async fn create_cipher_inner(
     collection_ids: Vec<String>,
 ) -> Result<Json<Cipher>, AppError> {
     let db = db::get_db(env)?;
+    if let Some(ef) = &cipher_data_req.encrypted_for {
+        if ef != &claims.sub {
+            return Err(AppError::BadRequest(
+                "Cipher must be encrypted for the owner".to_string(),
+            ));
+        }
+    }
     let now = Utc::now();
     let now = now.format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string();
 
@@ -164,6 +171,14 @@ pub async fn update_cipher(
 
     let cipher_data_req = payload;
 
+    if let Some(ef) = &cipher_data_req.encrypted_for {
+        if ef != &claims.sub {
+            return Err(AppError::BadRequest(
+                "Cipher must be encrypted for the owner".to_string(),
+            ));
+        }
+    }
+
     let cipher_data = CipherData {
         name: cipher_data_req.name,
         notes: cipher_data_req.notes,
@@ -198,20 +213,48 @@ pub async fn update_cipher(
 
     let data = serde_json::to_string(&cipher.data).map_err(|_| AppError::Internal)?;
 
-    query!(
-        &db,
-        "UPDATE ciphers SET organization_id = ?1, type = ?2, data = ?3, favorite = ?4, folder_id = ?5, updated_at = ?6 WHERE id = ?7 AND user_id = ?8",
-        cipher.organization_id,
-        cipher.r#type,
-        data,
-        cipher.favorite,
-        cipher.folder_id,
-        cipher.updated_at,
-        id,
-        claims.sub,
-    ).map_err(|_|AppError::Database)?
-    .run()
-    .await?;
+    let revision_check = cipher_data_req.last_known_revision_date.as_deref();
+    let result = if let Some(prev) = revision_check {
+        query!(
+            &db,
+            "UPDATE ciphers SET organization_id = ?1, type = ?2, data = ?3, favorite = ?4, folder_id = ?5, updated_at = ?6 WHERE id = ?7 AND user_id = ?8 AND updated_at = ?9",
+            cipher.organization_id,
+            cipher.r#type,
+            data,
+            cipher.favorite,
+            cipher.folder_id,
+            cipher.updated_at,
+            id,
+            claims.sub,
+            prev,
+        ).map_err(|_|AppError::Database)?
+        .run()
+        .await?
+    } else {
+        query!(
+            &db,
+            "UPDATE ciphers SET organization_id = ?1, type = ?2, data = ?3, favorite = ?4, folder_id = ?5, updated_at = ?6 WHERE id = ?7 AND user_id = ?8",
+            cipher.organization_id,
+            cipher.r#type,
+            data,
+            cipher.favorite,
+            cipher.folder_id,
+            cipher.updated_at,
+            id,
+            claims.sub,
+        ).map_err(|_|AppError::Database)?
+        .run()
+        .await?
+    };
+    let changes = result
+        .meta()
+        .ok()
+        .flatten()
+        .and_then(|m| m.changes)
+        .unwrap_or(0);
+    if changes == 0 {
+        return Err(AppError::Conflict("Cipher revision mismatch".to_string()));
+    }
 
     Ok(Json(cipher))
 }
@@ -388,6 +431,76 @@ pub async fn hard_delete_ciphers_delete(
     Json(payload): Json<CipherIdsRequest>,
 ) -> Result<Json<()>, AppError> {
     hard_delete_ciphers(claims, State(env), Json(payload)).await
+}
+
+#[worker::send]
+pub async fn get_cipher(
+    claims: Claims,
+    State(env): State<Arc<Env>>,
+    Path(id): Path<String>,
+) -> Result<Json<Cipher>, AppError> {
+    let db_model = get_cipher_dbmodel(&env, &id, &claims.sub).await?;
+    Ok(Json(db_model.into()))
+}
+
+#[worker::send]
+pub async fn partial_update_cipher(
+    claims: Claims,
+    State(env): State<Arc<Env>>,
+    Path(id): Path<String>,
+    Json(payload): Json<Value>,
+) -> Result<Json<Cipher>, AppError> {
+    let db = db::get_db(&env)?;
+    let now = Utc::now();
+    let now = now.format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string();
+
+    if let Some(favorite) = payload.get("favorite").and_then(|v| v.as_bool()) {
+        query!(
+            &db,
+            "UPDATE ciphers SET favorite = ?1, updated_at = ?2 WHERE id = ?3 AND user_id = ?4",
+            favorite,
+            now,
+            id,
+            claims.sub
+        )
+        .map_err(|_| AppError::Database)?
+        .run()
+        .await?;
+    }
+
+    if let Some(folder_id) = payload.get("folderId").and_then(|v| v.as_str()) {
+        query!(
+            &db,
+            "UPDATE ciphers SET folder_id = ?1, updated_at = ?2 WHERE id = ?3 AND user_id = ?4",
+            folder_id,
+            now,
+            id,
+            claims.sub
+        )
+        .map_err(|_| AppError::Database)?
+        .run()
+        .await?;
+    }
+
+    let updated = get_cipher_dbmodel(&env, &id, &claims.sub).await?;
+    Ok(Json(updated.into()))
+}
+
+#[worker::send]
+pub async fn purge_ciphers(
+    claims: Claims,
+    State(env): State<Arc<Env>>,
+) -> Result<Json<()>, AppError> {
+    let db = db::get_db(&env)?;
+    query!(
+        &db,
+        "DELETE FROM ciphers WHERE user_id = ?1 AND deleted_at IS NOT NULL",
+        claims.sub
+    )
+    .map_err(|_| AppError::Database)?
+    .run()
+    .await?;
+    Ok(Json(()))
 }
 
 #[cfg(test)]

@@ -1009,6 +1009,7 @@ pub async fn verify_passwordless_login_assertion(
             AppError::Crypto(msg) => msg,
             AppError::Internal => "internal server error".to_string(),
             AppError::TooManyRequests(msg) => msg,
+            AppError::Conflict(msg) => msg,
         }
     }
 
