@@ -15,7 +15,7 @@ fn decode_b64url(input: &str) -> Result<Vec<u8>, AppError> {
         return Ok(v);
     }
     let mut padded = input.to_string();
-    while padded.len() % 4 != 0 {
+    while !padded.len().is_multiple_of(4) {
         padded.push('=');
     }
     general_purpose::URL_SAFE

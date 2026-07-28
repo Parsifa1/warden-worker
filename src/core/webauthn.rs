@@ -1239,7 +1239,7 @@ fn decode_b64_any(input: &str) -> Result<Vec<u8>, AppError> {
         return Ok(v);
     }
     let mut padded = s.to_string();
-    while padded.len() % 4 != 0 {
+    while !padded.len().is_multiple_of(4) {
         padded.push('=');
     }
     if let Ok(v) = general_purpose::URL_SAFE.decode(&padded) {

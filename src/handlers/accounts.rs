@@ -53,15 +53,15 @@ pub struct ChangeEmailRequest {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[allow(dead_code)]
 pub struct UpdateAvatarRequest {
-    #[allow(dead_code)]
     pub avatar_color: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[allow(dead_code)]
 pub struct ProfileData {
-    #[allow(dead_code)]
     pub name: Option<String>,
 }
 
