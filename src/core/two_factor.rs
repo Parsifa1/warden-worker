@@ -25,20 +25,7 @@ pub fn generate_totp_secret_base32_20() -> String {
     Secret::Raw(bytes.to_vec()).to_encoded().to_string()
 }
 
-pub async fn ensure_two_factor_authenticator_table(db: &D1Database) -> Result<(), AppError> {
-    db.prepare(
-        "CREATE TABLE IF NOT EXISTS two_factor_authenticator (
-            user_id TEXT PRIMARY KEY NOT NULL,
-            enabled BOOLEAN NOT NULL DEFAULT 0,
-            secret_enc TEXT NOT NULL,
-            created_at TEXT NOT NULL,
-            updated_at TEXT NOT NULL,
-            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-        )",
-    )
-    .run()
-    .await
-    .map_err(|_| AppError::Database)?;
+pub async fn ensure_two_factor_authenticator_table(_db: &D1Database) -> Result<(), AppError> {
     Ok(())
 }
 
