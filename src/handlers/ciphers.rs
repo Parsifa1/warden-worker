@@ -358,19 +358,11 @@ pub async fn soft_delete_ciphers(
     let now = Utc::now();
     let now = now.format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string();
 
+    let mut stmts = Vec::with_capacity(payload.ids.len());
     for id in payload.ids {
-        query!(
-            &db,
-            "UPDATE ciphers SET deleted_at = ?1, updated_at = ?2 WHERE id = ?3 AND user_id = ?4",
-            now,
-            now,
-            id,
-            claims.sub
-        )
-        .map_err(|_| AppError::Database)?
-        .run()
-        .await?;
+        stmts.push(db.prepare("UPDATE ciphers SET deleted_at = ?1, updated_at = ?2 WHERE id = ?3 AND user_id = ?4").bind(&[now.clone().into(), now.clone().into(), id.into(), claims.sub.clone().into()])?);
     }
+    db.batch(stmts).await.map_err(|_| AppError::Database)?;
 
     Ok(Json(()))
 }
@@ -385,18 +377,11 @@ pub async fn restore_ciphers(
     let now = Utc::now();
     let now = now.format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string();
 
+    let mut stmts = Vec::with_capacity(payload.ids.len());
     for id in payload.ids {
-        query!(
-            &db,
-            "UPDATE ciphers SET deleted_at = NULL, updated_at = ?1 WHERE id = ?2 AND user_id = ?3",
-            now,
-            id,
-            claims.sub
-        )
-        .map_err(|_| AppError::Database)?
-        .run()
-        .await?;
+        stmts.push(db.prepare("UPDATE ciphers SET deleted_at = NULL, updated_at = ?1 WHERE id = ?2 AND user_id = ?3").bind(&[now.clone().into(), id.into(), claims.sub.clone().into()])?);
     }
+    db.batch(stmts).await.map_err(|_| AppError::Database)?;
 
     Ok(Json(()))
 }
@@ -409,17 +394,14 @@ pub async fn hard_delete_ciphers(
 ) -> Result<Json<()>, AppError> {
     let db = db::get_db(&env)?;
 
+    let mut stmts = Vec::with_capacity(payload.ids.len());
     for id in payload.ids {
-        query!(
-            &db,
-            "DELETE FROM ciphers WHERE id = ?1 AND user_id = ?2",
-            id,
-            claims.sub
-        )
-        .map_err(|_| AppError::Database)?
-        .run()
-        .await?;
+        stmts.push(
+            db.prepare("DELETE FROM ciphers WHERE id = ?1 AND user_id = ?2")
+                .bind(&[id.into(), claims.sub.clone().into()])?,
+        );
     }
+    db.batch(stmts).await.map_err(|_| AppError::Database)?;
 
     Ok(Json(()))
 }

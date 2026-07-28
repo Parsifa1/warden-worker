@@ -188,6 +188,7 @@ CREATE TABLE IF NOT EXISTS auth_requests (
 CREATE INDEX IF NOT EXISTS idx_ciphers_user_id ON ciphers(user_id);
 CREATE INDEX IF NOT EXISTS idx_ciphers_folder_id ON ciphers(folder_id);
 CREATE INDEX IF NOT EXISTS idx_sends_user_id ON sends(user_id);
+CREATE INDEX IF NOT EXISTS idx_sends_user_updated ON sends(user_id, updated_at DESC);
 CREATE INDEX IF NOT EXISTS idx_sends_deletion_date ON sends(deletion_date);
 CREATE INDEX IF NOT EXISTS idx_send_files_send_id ON send_files(send_id);
 CREATE INDEX IF NOT EXISTS idx_send_file_chunks_send_file_id ON send_file_chunks(send_file_id);
