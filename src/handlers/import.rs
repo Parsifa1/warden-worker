@@ -24,6 +24,14 @@ pub async fn import_data(
     let now = Utc::now();
     let now = now.format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string();
 
+    for import_cipher in &payload.ciphers {
+        if import_cipher.encrypted_for != claims.sub {
+            return Err(AppError::BadRequest(
+                "Cipher encrypted for wrong user".to_string(),
+            ));
+        }
+    }
+
     let folder_query = "INSERT OR IGNORE INTO folders (id, user_id, name, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5)";
 
     let mut folder_stmts: Vec<D1PreparedStatement> = Vec::new();
@@ -62,12 +70,6 @@ pub async fn import_data(
 
     let mut cipher_stmts: Vec<D1PreparedStatement> = Vec::new();
     for import_cipher in payload.ciphers {
-        if import_cipher.encrypted_for != claims.sub {
-            return Err(AppError::BadRequest(
-                "Cipher encrypted for wrong user".to_string(),
-            ));
-        }
-
         let cipher_data = CipherData {
             name: import_cipher.name,
             notes: import_cipher.notes,
