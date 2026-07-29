@@ -366,6 +366,18 @@ pub async fn get_device(
         .map_err(|_| AppError::Database)?;
 
     let Some(row) = row else {
+        let devices: Vec<Value> = db
+            .prepare("SELECT device_identifier FROM devices WHERE user_id = ?1")
+            .bind(&[claims.sub.clone().into()])?
+            .all()
+            .await
+            .map_err(|_| AppError::Database)?
+            .results()?;
+        log::warn!(
+            "Device not found. Requested: {}, existing: {:?}",
+            device_id,
+            devices
+        );
         return Err(AppError::NotFound("No device found".to_string()));
     };
 
