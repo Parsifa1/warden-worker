@@ -547,13 +547,14 @@ pub async fn register(
     };
 
     db.prepare(
-        "INSERT INTO users (id, name, email, master_password_hash, key, private_key, public_key, kdf_type, kdf_iterations, kdf_memory, kdf_parallelism, security_stamp, created_at, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
+        "INSERT INTO users (id, name, email, email_verified, master_password_hash, key, private_key, public_key, kdf_type, kdf_iterations, kdf_memory, kdf_parallelism, security_stamp, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
     )
     .bind(&[
         user.id.into(),
         to_js_val(user.name),
         user.email.into(),
+        (if user.email_verified { 1 } else { 0 }).into(),
         user.master_password_hash.into(),
         user.key.into(),
         user.private_key.into(),
