@@ -530,7 +530,7 @@ pub async fn register(
             )
         }),
         email: normalized_email,
-        email_verified: false,
+        email_verified: true,
         master_password_hash: payload.master_password_hash,
         master_password_hint: payload.master_password_hint,
         key: payload.user_symmetric_key,
