@@ -879,21 +879,6 @@ pub async fn verify_passwordless_login_assertion(
             app_error_message(e)
         ))
     })?;
-    let now_str = crate::utils::time_now();
-    let inserted: Option<i64> = db
-        .prepare(
-            "INSERT INTO used_passwordless_challenges (challenge, used_at) VALUES (?1, ?2)
-             ON CONFLICT(challenge) DO NOTHING",
-        )
-        .bind(&[claims.challenge.clone().into(), now_str.into()])?
-        .first(Some("changes"))
-        .await
-        .map_err(|_| AppError::Database)?;
-    if !matches!(inserted, Some(1)) {
-        return Err(AppError::Unauthorized(
-            "WebAuthn challenge already consumed".to_string(),
-        ));
-    }
     verify_origin(&claims.origin, &client_data.origin).map_err(|e| {
         AppError::Unauthorized(format!(
             "WebAuthn origin verification failed: {}",
@@ -978,6 +963,22 @@ pub async fn verify_passwordless_login_assertion(
         .run()
         .await
         .map_err(|_| AppError::Database)?;
+    }
+
+    let now_str = crate::utils::time_now();
+    let inserted: Option<i64> = db
+        .prepare(
+            "INSERT INTO used_passwordless_challenges (challenge, used_at) VALUES (?1, ?2)
+             ON CONFLICT(challenge) DO NOTHING",
+        )
+        .bind(&[claims.challenge.clone().into(), now_str.into()])?
+        .first(Some("changes"))
+        .await
+        .map_err(|_| AppError::Database)?;
+    if !matches!(inserted, Some(1)) {
+        return Err(AppError::Unauthorized(
+            "WebAuthn challenge already consumed".to_string(),
+        ));
     }
 
     Ok(PasswordlessLoginResult {
