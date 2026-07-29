@@ -12,7 +12,7 @@ use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::sync::Arc;
 use uuid::Uuid;
-use worker::Env;
+use worker::{query, Env};
 
 use crate::{auth::Claims, db, error::AppError, jwt, models::user::User, two_factor, webauthn};
 
@@ -462,25 +462,23 @@ pub async fn token(
                 if let Some(device_identifier) = device_identifier.as_deref() {
                     ensure_devices_table(&db).await?;
                     let now = crate::utils::time_now();
-                    if let Ok(stmt) = db
-                        .prepare(
-                            "INSERT INTO devices (id, user_id, device_identifier, device_name, device_type, remember_token_hash, created_at, updated_at)
-                             VALUES (?1, ?2, ?3, ?4, ?5, NULL, ?6, ?7)
-                             ON CONFLICT(user_id, device_identifier) DO UPDATE SET
-                               updated_at = excluded.updated_at,
-                               device_name = excluded.device_name,
-                               device_type = excluded.device_type",
-                        )
-                        .bind(&[
-                            Uuid::new_v4().to_string().into(),
-                            user_id.clone().into(),
-                            device_identifier.into(),
-                            device_name.clone().into(),
-                            device_type.map(f64::from).into(),
-                            now.clone().into(),
-                            now.into(),
-                        ])
-                    {
+                    let stmt = query!(
+                        &db,
+                        "INSERT INTO devices (id, user_id, device_identifier, device_name, device_type, remember_token_hash, created_at, updated_at)
+                         VALUES (?1, ?2, ?3, ?4, ?5, NULL, ?6, ?7)
+                         ON CONFLICT(user_id, device_identifier) DO UPDATE SET
+                           updated_at = excluded.updated_at,
+                           device_name = excluded.device_name,
+                           device_type = excluded.device_type",
+                        Uuid::new_v4().to_string(),
+                        user_id,
+                        device_identifier,
+                        device_name,
+                        device_type.map(f64::from),
+                        now.clone(),
+                        now,
+                    );
+                    if let Ok(stmt) = stmt {
                         let _ = stmt.run().await;
                     }
                 }
@@ -621,27 +619,25 @@ pub async fn token(
                 let now = crate::utils::time_now();
                 let remember_hash = remember_token_to_return.as_deref().map(sha256_hex);
 
-                if let Ok(stmt) = db
-                    .prepare(
-                        "INSERT INTO devices (id, user_id, device_identifier, device_name, device_type, remember_token_hash, created_at, updated_at)
-                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
-                         ON CONFLICT(user_id, device_identifier) DO UPDATE SET
-                           updated_at = excluded.updated_at,
-                           device_name = excluded.device_name,
-                           device_type = excluded.device_type,
-                           remember_token_hash = COALESCE(excluded.remember_token_hash, devices.remember_token_hash)",
-                    )
-                    .bind(&[
-                        Uuid::new_v4().to_string().into(),
-                        user_id.clone().into(),
-                        device_identifier.into(),
-                        device_name.clone().into(),
-                        device_type.map(f64::from).into(),
-                        remember_hash.clone().into(),
-                        now.clone().into(),
-                        now.into(),
-                    ])
-                {
+                let stmt = query!(
+                    &db,
+                    "INSERT INTO devices (id, user_id, device_identifier, device_name, device_type, remember_token_hash, created_at, updated_at)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+                     ON CONFLICT(user_id, device_identifier) DO UPDATE SET
+                       updated_at = excluded.updated_at,
+                       device_name = excluded.device_name,
+                       device_type = excluded.device_type,
+                       remember_token_hash = COALESCE(excluded.remember_token_hash, devices.remember_token_hash)",
+                    Uuid::new_v4().to_string(),
+                    user_id,
+                    device_identifier,
+                    device_name,
+                    device_type.map(f64::from),
+                    remember_hash,
+                    now.clone(),
+                    now,
+                );
+                if let Ok(stmt) = stmt {
                     let _ = stmt.run().await;
                 }
             }
@@ -741,27 +737,25 @@ pub async fn token(
                 ensure_devices_table(&db).await?;
 
                 let now = crate::utils::time_now();
-                if let Ok(stmt) = db
-                    .prepare(
-                        "INSERT INTO devices (id, user_id, device_identifier, device_name, device_type, remember_token_hash, created_at, updated_at)
-                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
-                         ON CONFLICT(user_id, device_identifier) DO UPDATE SET
-                           updated_at = excluded.updated_at,
-                           device_name = excluded.device_name,
-                           device_type = excluded.device_type,
-                           remember_token_hash = COALESCE(excluded.remember_token_hash, devices.remember_token_hash)",
-                    )
-                    .bind(&[
-                        Uuid::new_v4().to_string().into(),
-                        user_id.clone().into(),
-                        device_identifier.into(),
-                        device_name.clone().into(),
-                        device_type.map(f64::from).into(),
-                        Option::<String>::None.into(),
-                        now.clone().into(),
-                        now.into(),
-                    ])
-                {
+                let stmt = query!(
+                    &db,
+                    "INSERT INTO devices (id, user_id, device_identifier, device_name, device_type, remember_token_hash, created_at, updated_at)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+                     ON CONFLICT(user_id, device_identifier) DO UPDATE SET
+                       updated_at = excluded.updated_at,
+                       device_name = excluded.device_name,
+                       device_type = excluded.device_type,
+                       remember_token_hash = COALESCE(excluded.remember_token_hash, devices.remember_token_hash)",
+                    Uuid::new_v4().to_string(),
+                    user_id,
+                    device_identifier,
+                    device_name,
+                    device_type.map(f64::from),
+                    Option::<String>::None,
+                    now.clone(),
+                    now,
+                );
+                if let Ok(stmt) = stmt {
                     let _ = stmt.run().await;
                 }
             }
