@@ -159,6 +159,7 @@ pub async fn profile(claims: Claims, State(env): State<Arc<Env>>) -> Result<Json
         "premiumFromOrganization": false,
         "masterPasswordHint": user.master_password_hint,
         "culture": "en-US",
+        "Culture": "en-US",
         "twoFactorEnabled": two_factor_enabled,
         "key": user.key,
         "privateKey": user.private_key,

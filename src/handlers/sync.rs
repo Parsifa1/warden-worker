@@ -121,6 +121,7 @@ pub async fn get_sync_data(
     let profile = Profile {
         id: user.id,
         name: user.name,
+        culture: "en-US".to_string(),
         email: user.email.clone(),
         master_password_hint: user.master_password_hint,
         security_stamp: user.security_stamp,

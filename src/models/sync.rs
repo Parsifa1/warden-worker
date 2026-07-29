@@ -3,6 +3,8 @@ use serde::Serialize;
 #[derive(Debug, Serialize)]
 pub struct Profile {
     pub name: Option<String>,
+    #[serde(rename = "Culture")]
+    pub culture: String,
     pub email: String,
     pub id: String,
     #[serde(rename = "masterPasswordHint")]
