@@ -480,7 +480,7 @@ pub async fn token(
                                                 now.clone().into(),
                                                 now.into(),
                                             ])?;
-                    let _ = stmt.run().await;
+                    stmt.run().await?;
                 }
 
                 let access_token_to_set = response
@@ -639,7 +639,7 @@ pub async fn token(
                                             now.clone().into(),
                                             now.into(),
                                         ])?;
-                let _ = stmt.run().await;
+                stmt.run().await?;
             }
 
             if let Some(token) = remember_token_to_return {
@@ -757,7 +757,7 @@ pub async fn token(
                         now.clone().into(),
                         now.clone().into(),
                     ])?;
-                let _ = stmt.run().await;
+                stmt.run().await?;
             }
 
             let access_token_to_set = response

@@ -360,7 +360,7 @@ pub async fn get_device(
              WHERE user_id = ?1 AND device_identifier = ?2
              LIMIT 1",
         )
-        .bind(&[claims.sub.into(), device_id.into()])?
+        .bind(&[claims.sub.clone().into(), device_id.clone().into()])?
         .first(None)
         .await
         .map_err(|_| AppError::Database)?;
